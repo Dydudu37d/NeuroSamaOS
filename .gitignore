@@ -8,3 +8,4 @@ compile_commands.json
 *.fd
 compile_commands.json
 .cache/
+disk/
