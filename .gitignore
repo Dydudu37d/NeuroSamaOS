@@ -2,3 +2,9 @@
 *.o
 *.efi
 compile_commands.json
+# 编译产物
+*.o
+*.efi
+*.fd
+compile_commands.json
+.cache/
