@@ -53,6 +53,33 @@ typedef u64   EFI_PHYSICAL_ADDRESS;
 #define EFI_SECURITY_VIOLATION        ((EFI_STATUS)(1ULL << 63) | 26)
 
 //=============================================================================
+//  Memory Types (for AllocatePool/AllocatePages)
+//=============================================================================
+#define EfiReservedMemoryType       0
+#define EfiLoaderCode               1
+#define EfiLoaderData               2
+#define EfiBootServicesCode         3
+#define EfiBootServicesData         4
+#define EfiRuntimeServicesCode      5
+#define EfiRuntimeServicesData      6
+#define EfiConventionalMemory       7
+#define EfiMaxMemoryType            8
+
+#define EFI_PAGE_SIZE 4096
+#define EFI_SIZE_TO_PAGES(x) (((x) + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE)
+
+
+//=============================================================================
+//  Allocate Types (for AllocatePages)
+//=============================================================================
+typedef enum {
+    AllocateAnyPages,
+    AllocateMaxAddress,
+    AllocateAddress,
+    MaxAllocateType
+} EFI_ALLOCATE_TYPE;
+
+//=============================================================================
 //  EFI Table Header
 //=============================================================================
 typedef struct {

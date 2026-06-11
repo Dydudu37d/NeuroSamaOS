@@ -1,0 +1,21 @@
+[
+ {
+  "directory": "/data/data/com.termux/files/home/Fish/NeuroSamaOS",
+  "arguments": [
+   "clang",
+   "--target=x86_64-unknown-windows-msvc",
+   "-ffreestanding",
+   "-nostdlib",
+   "-mno-red-zone",
+   "-O3",
+   "-Wall",
+   "-mavx2",
+   "-msse",
+   "-c",
+   "Main.c",
+   "-o",
+   "Main.o"
+  ],
+  "file": "Main.c"
+ }
+]
