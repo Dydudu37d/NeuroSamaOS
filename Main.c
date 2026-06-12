@@ -2,13 +2,16 @@
 #include "gop.h"
 #include "str.h"
 #include "debug.h"
+#include "clock.h"
+#include "pci.h"
+#include "xhci.h"
 
 u32* GopOut=NULL;
 u32* GopBack=NULL;
 
 EFI_BOOT_SERVICES *bs=NULL;
-EFI_GOP_MODE *GopMode=NULL;
-EFI_GOP_MODE_INFO *GopInfo=NULL;
+EFI_GOP_MODE GopMode={0};
+EFI_GOP_MODE_INFO GopInfo={0};
 EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop=NULL;
 
 EFI_GUID GopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
@@ -32,56 +35,90 @@ static void SIMDInit(void) {
     __asm__ volatile ("xsetbv" : : "c"(0), "A"(xcr0));
 }
 
-EFI_STATUS EFIAPI efi_main(void *image, EFI_SYSTEM_TABLE *sys) {
+EFI_STATUS ExitBootServices_Safe(EFI_HANDLE ImageHandle) {
+    EFI_STATUS status;
+    UINTN MapKey;
+    UINTN MemoryMapSize = 1024 * 8;
+    u8 MemoryMapBuffer[1024 * 8];
+    UINTN DescriptorSize;
+    u32 DescriptorVersion;
+
+    while (1) {
+        MemoryMapSize = sizeof(MemoryMapBuffer);
+        status = bs->GetMemoryMap(&MemoryMapSize, (void*)MemoryMapBuffer, &MapKey, &DescriptorSize, &DescriptorVersion);
+        
+        if (EFI_ERROR(status)) {
+            return status; 
+        }
+        status = bs->ExitBootServices(ImageHandle, MapKey);
+        
+        if (status == EFI_SUCCESS) {
+            break;
+        }
+    }
+
+    return status;
+}
+
+void kernel_main(){
+    while (1){
+
+    }
+}
+
+__attribute__((used, retain, visibility("default")))
+EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
+    bs=sys->BootServices;
     SIMDInit();
     DebugInit();
-    bs=sys->BootServices;
+    InitClock();
     
-    EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *TextConOut=sys->ConOut;
-    TextConOut->OutputString(TextConOut,(u16*)L"NeuroSamaOS.UEFI Boot Time:\r\n");
-    TextConOut->OutputString(TextConOut,(u16*)L"GOP Init.\r\n");
+    DebugStr("NeuroSamaOS.UEFI Boot Time:\n");
+    DebugStr("GOP Init.\n");
     EFI_STATUS Status = bs->LocateProtocol(&GopGuid, NULL, (void **)&Gop);
-    TextConOut->OutputString(TextConOut,(u16*)L"GOP(Left low Right high):");
-    for (u64 idx=0;idx<65;idx++){
-        u16 Temp[2]={0};
-        Temp[0] = (Status & (1ULL << idx)) ? '1' : '0';
-        Temp[1] = '\0';
-        TextConOut->OutputString(TextConOut,Temp);
-    }
-    TextConOut->OutputString(TextConOut,(u16*)L".\r\n");
+    DebugStr("GOP(Left low Right high):");
+    DebugU64Bit(Status);
+    DebugChar('\n');
     Gop->SetMode(Gop,0);
 
-    GopMode=Gop->Mode;
-    GopInfo=GopMode->Info;
+    GopMode.Mode=Gop->Mode->Mode;
+    GopMode.MaxMode=Gop->Mode->MaxMode;
+    GopMode.FrameBufferBase=Gop->Mode->FrameBufferBase;
+    GopMode.FrameBufferSize=Gop->Mode->FrameBufferSize;
+    GopMode.SizeOfInfo=Gop->Mode->SizeOfInfo;
+    GopMode.Info=Gop->Mode->Info;
+    GopInfo.PixelFormat=GopMode.Info->PixelFormat;
+    GopInfo.PixelsPerScanLine=GopMode.Info->PixelsPerScanLine;
+    GopInfo.PixelInformation=GopMode.Info->PixelInformation;
+    GopInfo.HorizontalResolution=GopMode.Info->HorizontalResolution;
+    GopInfo.VerticalResolution=GopMode.Info->VerticalResolution;
+    GopInfo.Version=GopMode.Info->Version;
     
-    TextConOut->OutputString(TextConOut, (u16*)L"Pixel Format is: ");
     DebugStr("Pixel Format is: ");
-    if (GopInfo->PixelFormat == 0) {
-        TextConOut->OutputString(TextConOut, (u16*)L"BGR\r\n");
+    if (GopInfo.PixelFormat == 0) {
         DebugStr("BGR\n");
-    } else if (GopInfo->PixelFormat == 1) {
-        TextConOut->OutputString(TextConOut, (u16*)L"RGB\r\n");
+    } else if (GopInfo.PixelFormat == 1) {
         DebugStr("RGB\n");
-    } else if (GopInfo->PixelFormat == 2) {
-        TextConOut->OutputString(TextConOut, (u16*)L"BitMask\r\n");
+    } else if (GopInfo.PixelFormat == 2) {
         DebugStr("BitMask\n");
     }
-
-    u32 FrameBufferSize = GopMode->FrameBufferSize;
+    
+    u32 FrameBufferSize = GopMode.FrameBufferSize;
     u32 PagesNeeded = (FrameBufferSize + 4095) / 4096;
-    GopOut = (u32*)(u64)GopMode->FrameBufferBase;
+    GopOut = (u32*)(u64)GopMode.FrameBufferBase;
     EFI_PHYSICAL_ADDRESS GopBackReal;
     EFI_STATUS s = bs->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, 
                   PagesNeeded, &GopBackReal);
     DebugU64(s);
     GopBack = (u32*)(u64)GopBackReal;
     
+    DebugStr("\nExitBootServices Status:");
+    DebugU64(ExitBootServices_Safe(image));
+    DebugChar('\n');
+
     GOPClear(0x00FFABC1);
     GOPFlash();
     
-    
-
-    while (1);
 
     return 0;
 }

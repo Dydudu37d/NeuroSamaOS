@@ -8,11 +8,11 @@ static inline int abs(int x) {
 
 void GOPPixel(u32 x, u32 y, u32 rgba){
     extern u32* GopBack;
-    extern EFI_GOP_MODE_INFO* GopInfo;
-    if (x>=GopInfo->HorizontalResolution || \
-        y>=GopInfo->VerticalResolution) return;
+    extern EFI_GOP_MODE_INFO GopInfo;
+    if (x>=GopInfo.HorizontalResolution || \
+        y>=GopInfo.VerticalResolution) return;
 
-    GopBack[y*GopInfo->PixelsPerScanLine+x]=GopInfo->PixelFormat==0?RGBA2ABGR(rgba):rgba;
+    GopBack[y*GopInfo.PixelsPerScanLine+x]=GopInfo.PixelFormat==0?RGBA2ABGR(rgba):rgba;
 }
 
 void GOPLine(u32 x[2], u32 y[2], u32 rgba){
@@ -51,17 +51,17 @@ void GOPLine(u32 x[2], u32 y[2], u32 rgba){
 
 void GOPRect(u32 x[2], u32 y[2], u32 rgba){
     extern u32* GopBack;
-    extern EFI_GOP_MODE_INFO* GopInfo;
+    extern EFI_GOP_MODE_INFO GopInfo;
     
     u32 startX = x[0], startY = y[0];
     u32 endX = x[1], endY = y[1];
     
-    if (startX >= GopInfo->HorizontalResolution || startY >= GopInfo->VerticalResolution) return;
-    if (endX > GopInfo->HorizontalResolution) endX = GopInfo->HorizontalResolution;
-    if (endY > GopInfo->VerticalResolution) endY = GopInfo->VerticalResolution;
+    if (startX >= GopInfo.HorizontalResolution || startY >= GopInfo.VerticalResolution) return;
+    if (endX > GopInfo.HorizontalResolution) endX = GopInfo.HorizontalResolution;
+    if (endY > GopInfo.VerticalResolution) endY = GopInfo.VerticalResolution;
     if (startX >= endX || startY >= endY) return;
     
-    u32 pixel = (GopInfo->PixelFormat == 0) ? RGBA2ABGR(rgba) : rgba;
+    u32 pixel = (GopInfo.PixelFormat == 0) ? RGBA2ABGR(rgba) : rgba;
     
     for (u32 col = startX; col < endX; col++) {
         GOPPixel(col, startY, pixel);
@@ -82,19 +82,19 @@ void GOPRect(u32 x[2], u32 y[2], u32 rgba){
 
 void GOPRectFill(u32 x[2], u32 y[2], u32 rgba){
     extern u32* GopBack;
-    extern EFI_GOP_MODE_INFO* GopInfo;
+    extern EFI_GOP_MODE_INFO GopInfo;
     
     u32 startX = x[0], startY = y[0];
     u32 endX = x[1], endY = y[1];
     
-    if (startX >= GopInfo->HorizontalResolution || startY >= GopInfo->VerticalResolution) return;
-    if (endX > GopInfo->HorizontalResolution) endX = GopInfo->HorizontalResolution;
-    if (endY > GopInfo->VerticalResolution) endY = GopInfo->VerticalResolution;
+    if (startX >= GopInfo.HorizontalResolution || startY >= GopInfo.VerticalResolution) return;
+    if (endX > GopInfo.HorizontalResolution) endX = GopInfo.HorizontalResolution;
+    if (endY > GopInfo.VerticalResolution) endY = GopInfo.VerticalResolution;
     if (startX >= endX || startY >= endY) return;
     
     u32 width = endX - startX;
-    u32 stride = GopInfo->PixelsPerScanLine;
-    u32 pixel = (GopInfo->PixelFormat == 0) ? RGBA2ABGR(rgba) : rgba;
+    u32 stride = GopInfo.PixelsPerScanLine;
+    u32 pixel = (GopInfo.PixelFormat == 0) ? RGBA2ABGR(rgba) : rgba;
     
     u32* firstRow = GopBack + startY * stride + startX;
     for (u32 i = 0; i < width; i++) {
@@ -110,12 +110,12 @@ void GOPRectFill(u32 x[2], u32 y[2], u32 rgba){
 
 void GOPClear(u32 rgba){
     extern u32* GopBack;
-    extern EFI_GOP_MODE_INFO* GopInfo;
+    extern EFI_GOP_MODE_INFO GopInfo;
     
-    u32 width = GopInfo->HorizontalResolution;
-    u32 height = GopInfo->VerticalResolution;
-    u32 stride = GopInfo->PixelsPerScanLine;
-    u32 pixel = (GopInfo->PixelFormat == 0) ? RGBA2ABGR(rgba) : rgba;
+    u32 width = GopInfo.HorizontalResolution;
+    u32 height = GopInfo.VerticalResolution;
+    u32 stride = GopInfo.PixelsPerScanLine;
+    u32 pixel = (GopInfo.PixelFormat == 0) ? RGBA2ABGR(rgba) : rgba;
     
     u32* firstRow = GopBack;
     for (u32 i = 0; i < width; i++) {
@@ -132,9 +132,9 @@ void GOPClear(u32 rgba){
 void GOPFlash(){
     extern u32* GopBack;
     extern u32* GopOut;
-    extern EFI_GOP_MODE* GopMode;
+    extern EFI_GOP_MODE GopMode;
 
-    MemCopy(GopOut, GopBack, GopMode->FrameBufferSize);
+    MemCopy(GopOut, GopBack, GopMode.FrameBufferSize);
 
     asm volatile("sfence" ::: "memory");
 }

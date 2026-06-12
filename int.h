@@ -1,5 +1,7 @@
 #pragma once
 
+#include <immintrin.h>
+
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -15,6 +17,9 @@ typedef __SIZE_TYPE__ size_t;
 typedef __builtin_va_list __gnuc_va_list;
 typedef __gnuc_va_list va_list;
 
+typedef __m128i u128;
+typedef __m128i s128;
+
 #define NULL ((void*)0)
 
 #define true 1
@@ -22,23 +27,10 @@ typedef __gnuc_va_list va_list;
 
 #define ALIGN_UP(val, align)   (((val) + (align) - 1) & ~((align) - 1))
 #define ALIGN_DOWN(val, align) ((val) & ~((align) - 1))
+#define PTR_ALIGN_UP(ptr, align) ((void*)ALIGN_UP((u64)(ptr), (align)))
+#define LOAD_128(ptr) _mm_load_si128((const u128*)(ptr))
+#define LOAD_128_UNALIGNED(ptr) _mm_loadu_si128((const u128*)(ptr))
 
-typedef struct{
-    u64 low;
-    u64 high;
-} __attribute__((packed)) u128;
-
-typedef struct{
-    s64 low;
-    s64 high;
-} __attribute__((packed)) s128;
-
-typedef struct{
-    double low;
-    double high;
-} __attribute__((packed))  dd;
-
-typedef struct{
-    float low;
-    float high;
-} __attribute__((packed)) ff;
+inline _Bool IsAligned(void* ptr,u8 Aligned) {
+    return ((((u64)ptr)) & Aligned) == 0;
+}

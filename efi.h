@@ -27,6 +27,7 @@
 typedef u64   EFI_STATUS;
 typedef u64   EFI_HANDLE;
 typedef u64   UINTN;
+typedef s64   INTN;
 typedef u64   EFI_PHYSICAL_ADDRESS;
 
 //=============================================================================
@@ -51,7 +52,7 @@ typedef u64   EFI_PHYSICAL_ADDRESS;
 #define EFI_TIMEOUT                   ((EFI_STATUS)(1ULL << 63) | 16)
 #define EFI_ABORTED                   ((EFI_STATUS)(1ULL << 63) | 17)
 #define EFI_SECURITY_VIOLATION        ((EFI_STATUS)(1ULL << 63) | 26)
-
+#define EFI_ERROR(status) (((INTN)(status)) < 0)
 //=============================================================================
 //  Memory Types (for AllocatePool/AllocatePages)
 //=============================================================================
@@ -143,7 +144,7 @@ typedef struct EFI_BOOT_SERVICES {
     EFI_STATUS (EFIAPI *StartImage)(u64 ImageHandle, u64 *ExitDataSize, u16 **ExitData);
     EFI_STATUS (EFIAPI *Exit)(u64 ImageHandle, EFI_STATUS ExitStatus, u64 ExitDataSize, u16 *ExitData);
     EFI_STATUS (EFIAPI *UnloadImage)(u64 ImageHandle);
-    EFI_STATUS (EFIAPI *ExitBootServices)(u64 ImageHandle, u64 MapKey);
+    EFI_STATUS (EFIAPI *ExitBootServices)(EFI_HANDLE ImageHandle, u64 MapKey);
     
     EFI_STATUS (EFIAPI *GetNextMonotonicCount)(u64 *Count);
     void (EFIAPI *Stall)(u64 Microseconds);
