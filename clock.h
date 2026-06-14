@@ -15,6 +15,18 @@ static inline u64 rdtscp(void) {
     return ((u64)high << 32) | low;
 }
 
+static inline u64 rdmsr(u32 msr) {
+    u32 low, high;
+    asm volatile("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
+    return ((u64)high << 32) | low;
+}
+
+static inline void wrmsr(u32 msr, u64 value) {
+    u32 low = value & 0xFFFFFFFF;
+    u32 high = value >> 32;
+    asm volatile("wrmsr" : : "a"(low), "d"(high), "c"(msr));
+}
+
 static inline u64 rdtsc_serialized(void) {
     u32 low, high;
     __asm__ __volatile__(
@@ -45,3 +57,8 @@ u64 SystemGetTimeNano(void);
 u64 SystemGetTimeMillis(void);
 u64 GetTscFrequency(void);
 void SetTscFrequency(u64 f);
+
+void SystemBusySleepS(u64 Time);
+void SystemBusySleepNano(u64 Time);
+void SystemBusySleepMs(u64 Time);
+

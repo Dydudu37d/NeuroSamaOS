@@ -32,3 +32,19 @@ u64 GetTscFrequency(void) {
 void SetTscFrequency(u64 f){
     g_tsc_frequency=f;
 }
+
+void SystemBusySleepS(u64 Time){
+    u64 NowTime=SystemGetTime();
+    while (SystemGetTime() > NowTime+Time);
+}
+
+void SystemBusySleepNano(u64 Time){
+    u64 NowTime=SystemGetTimeNano();
+    while (SystemGetTimeNano() > NowTime+Time);
+}
+
+void SystemBusySleepMs(u64 Time){
+    u64 NowTime=SystemGetTimeMillis();
+    while (SystemGetTimeMillis() > NowTime+Time);
+}
+

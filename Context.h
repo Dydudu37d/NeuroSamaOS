@@ -7,7 +7,7 @@ typedef struct{
     u64 cs, ds, es, fs, gs, ss;
     u64 rflags;
     u8 SIMDBuffer[2048] __attribute__((aligned(64)));
-} RegContext;
+} __attribute__((aligned(64))) RegContext;
 
 static inline void SaveContext(RegContext *ctx) {
     asm volatile(
@@ -54,7 +54,7 @@ static inline void SaveContext(RegContext *ctx) {
     );
 }
 
-static inline void LoadContext(RegContext *ctx) {
+static inline void LoadContext(RegContext ctx) {
     asm volatile(
         "xrstor %22\n"
         "mov %17, %%ds\n"
@@ -81,18 +81,18 @@ static inline void LoadContext(RegContext *ctx) {
         "mov %15, %%r15\n"
         "mov %4,  %%rsp\n"
         :
-        : "m"(ctx->Reg0t15[0]),  "m"(ctx->Reg0t15[1]),
-          "m"(ctx->Reg0t15[2]),  "m"(ctx->Reg0t15[3]),
-          "m"(ctx->Reg0t15[4]),  "m"(ctx->Reg0t15[5]),
-          "m"(ctx->Reg0t15[6]),  "m"(ctx->Reg0t15[7]),
-          "m"(ctx->Reg0t15[8]),  "m"(ctx->Reg0t15[9]),
-          "m"(ctx->Reg0t15[10]), "m"(ctx->Reg0t15[11]),
-          "m"(ctx->Reg0t15[12]), "m"(ctx->Reg0t15[13]),
-          "m"(ctx->Reg0t15[14]), "m"(ctx->Reg0t15[15]),
-          "m"(ctx->ds),  "m"(ctx->es),
-          "m"(ctx->fs),  "m"(ctx->gs),
-          "m"(ctx->ss),  "m"(ctx->rflags),
-          "m"(ctx->SIMDBuffer)
+        : "m"(ctx.Reg0t15[0]),  "m"(ctx.Reg0t15[1]),
+          "m"(ctx.Reg0t15[2]),  "m"(ctx.Reg0t15[3]),
+          "m"(ctx.Reg0t15[4]),  "m"(ctx.Reg0t15[5]),
+          "m"(ctx.Reg0t15[6]),  "m"(ctx.Reg0t15[7]),
+          "m"(ctx.Reg0t15[8]),  "m"(ctx.Reg0t15[9]),
+          "m"(ctx.Reg0t15[10]), "m"(ctx.Reg0t15[11]),
+          "m"(ctx.Reg0t15[12]), "m"(ctx.Reg0t15[13]),
+          "m"(ctx.Reg0t15[14]), "m"(ctx.Reg0t15[15]),
+          "m"(ctx.ds),  "m"(ctx.es),
+          "m"(ctx.fs),  "m"(ctx.gs),
+          "m"(ctx.ss),  "m"(ctx.rflags),
+          "m"(ctx.SIMDBuffer)
         : "memory"
     );
 }

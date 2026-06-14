@@ -4,7 +4,7 @@
 
 typedef struct AllocBlock {
     struct AllocBlock* next;
-    void* ptr;
+    struct AllocBlock* prev;
     size_t size;
     u8 is_free;
 } __attribute__((aligned(64))) AllocBlock;
@@ -13,7 +13,7 @@ typedef struct {
     AllocBlock* Head;
 } __attribute__((aligned(64))) AllocPool;
 
-void PoolAddBlock(AllocPool* Pool,AllocBlock *Block);
-void *Alloc(AllocPool* Pool,size_t size);
-void *Aligned_Alloc(AllocPool* Pool,size_t size,u8 Aligned);
-void Free(AllocPool* Pool,void *ptr);
+void PoolAddBlock(AllocPool* Pool, AllocBlock* Block);
+void* Alloc(AllocPool* Pool, size_t size);
+void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align);
+void Free(AllocPool* Pool, void* ptr);

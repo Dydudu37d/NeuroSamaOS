@@ -47,7 +47,8 @@ void MemCopy(void* D, const void* S, size_t size) {
     }
 }
 
-void MemSet(u8* D, const u8 S, size_t size) {
+
+void MemSet(void* D, const u8 S, size_t size) {
     if (size >= 2000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 32;
 
@@ -74,7 +75,7 @@ void MemSet(u8* D, const u8 S, size_t size) {
     }
 }
 
-void MemSet16(u16* D, const u16 S, size_t size) {
+void MemSet16(void* D, const u16 S, size_t size) {
     if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 16; 
 
@@ -103,13 +104,13 @@ void MemSet16(u16* D, const u16 S, size_t size) {
     }
 }
 
-void MemSet32(u32* D, const u32 S, size_t size) {
+void MemSet32(void* D, const u32 S, size_t size) {
     if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 8; 
 
         __asm__ __volatile__(
             "movd %2, %%xmm0\n\t"
-            "vpbroadcastw %%xmm0, %%ymm0\n\t"
+            "vpbroadcastd %%xmm0, %%ymm0\n\t"
 
             "1:\n\t"
             "vmovntdq %%ymm0, (%0)\n\t"
@@ -124,7 +125,7 @@ void MemSet32(u32* D, const u32 S, size_t size) {
         );
     } else {
         __asm__ __volatile__(
-            "cld\n\t rep stosw"
+            "cld\n\t rep stosl"
             : "+D"(D), "+c"(size)
             : "a"(S)
             : "memory"
@@ -132,13 +133,13 @@ void MemSet32(u32* D, const u32 S, size_t size) {
     }
 }
 
-void MemSet64(u64* D, const u64 S, size_t size) {
+void MemSet64(void* D, const u64 S, size_t size) {
     if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 4; 
 
         __asm__ __volatile__(
             "movd %2, %%xmm0\n\t"
-            "vpbroadcastw %%xmm0, %%ymm0\n\t"
+            "vpbroadcastq %%xmm0, %%ymm0\n\t"
 
             "1:\n\t"
             "vmovntdq %%ymm0, (%0)\n\t"
@@ -153,7 +154,7 @@ void MemSet64(u64* D, const u64 S, size_t size) {
         );
     } else {
         __asm__ __volatile__(
-            "cld\n\t rep stosw"
+            "cld\n\t rep stosq"
             : "+D"(D), "+c"(size)
             : "a"(S)
             : "memory"

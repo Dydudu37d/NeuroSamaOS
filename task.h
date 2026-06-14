@@ -3,7 +3,7 @@
 #include "int.h"
 
 #define MaxTaskCount 256
-#define UesrTaskStart 50
+#define UserTaskStart 50
 #define SystemTaskStart 0
 #define SystemTaskEnd 49
 
@@ -15,8 +15,8 @@ typedef struct{
     void *Arg;
     _Bool Active;
     const char* Name;
-    u64 NextWaitMs;
-    u64 IntervalMs;
+    u64 NextWaitNs;
+    u64 IntervalNs;
 } Task;
 
 u16 TaskAdd(Task AddTask,_Bool SystemTask);

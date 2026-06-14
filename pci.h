@@ -1,113 +1,173 @@
 #pragma once
-#include "int.h"
+
+#define PCI_CONFIG_ADDRESS 0xCF8
+#define PCI_CONFIG_DATA    0xCFC
+
 #include "port.h"
-#include "debug.h"
+#include "int.h"
 
-#define PCI_CONFIG_ADDR 0xCF8
-#define PCI_CONFIG_DATA 0xCFC
-#define PCI_CAP_PTR          0x34
-#define PCI_CAP_ID_PCIE      0x10
-#define PCI_CAP_ID_MSI       0x05
-#define PCI_CAP_ID_MSIX      0x11
-#define PCIE_EXT_CAP_START   0x100
-
-static inline u32 pci_make_addr(u8 bus, u8 slot, u8 func, u8 offset) {
-    return (1 << 31)
-         | ((u32)bus << 16)
-         | ((u32)slot << 11)
-         | ((u32)func << 8)
-         | (offset & 0xFC);
+static inline u32 PCIAddr(u8 Bus, u8 Slot, u8 Func, u8 Offset)
+{
+    return ((1 << 31) | (Bus << 16) | ((Slot & 0x1F) << 11) | ((Func & 0x07) << 8) | (Offset & 0xFC));
 }
 
-static inline u32 pci_read_dword(u8 bus, u8 slot, u8 func, u8 offset) {
-    outl(PCI_CONFIG_ADDR, pci_make_addr(bus, slot, func, offset));
+static inline u32 PCIReadDWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
     return inl(PCI_CONFIG_DATA);
 }
 
-static inline u16 pci_read_word(u8 bus, u8 slot, u8 func, u8 offset) {
-    outl(PCI_CONFIG_ADDR, pci_make_addr(bus, slot, func, offset));
-    return inw(PCI_CONFIG_DATA + (offset & 2));
+static inline void PCIWriteDWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset, u32 Value)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
+    outl(PCI_CONFIG_DATA, Value);
 }
 
-static inline u8 pci_read_byte(u8 bus, u8 slot, u8 func, u8 offset) {
-    outl(PCI_CONFIG_ADDR, pci_make_addr(bus, slot, func, offset));
-    return inb(PCI_CONFIG_DATA + (offset & 3));
+static inline u16 PCIReadWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
+    return inw(PCI_CONFIG_DATA);
 }
 
-static inline void pci_write_dword(u8 bus, u8 slot, u8 func, u8 offset, u32 val) {
-    outl(PCI_CONFIG_ADDR, pci_make_addr(bus, slot, func, offset));
-    outl(PCI_CONFIG_DATA, val);
+static inline void PCIWriteWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset, u16 Value)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
+    outw(PCI_CONFIG_DATA, Value);
 }
 
-static inline u8 pci_find_capability(u8 bus, u8 slot, u8 func, u8 cap_id) {
-    u8 cap_ptr = pci_read_byte(bus, slot, func, PCI_CAP_PTR);
-    while (cap_ptr >= 0x40) {
-        u8 this_id = pci_read_byte(bus, slot, func, cap_ptr);
-        if (this_id == cap_id) return cap_ptr;
-        cap_ptr = pci_read_byte(bus, slot, func, cap_ptr + 1);
-        if (cap_ptr == 0xFF) break;
-    }
-    return 0;
+static inline u8 PCIReadBYTE(u8 Bus, u8 Slot, u8 Func, u8 Offset)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
+    return inb(PCI_CONFIG_DATA);
 }
 
-static inline u16 pcie_find_ext_cap(u8 bus, u8 slot, u8 func, u16 cap_id) {
-    u16 offset = PCIE_EXT_CAP_START;
-    for (int i = 0; i < 480; i++) {
-        u32 hdr = pci_read_dword(bus, slot, func, offset);
-        if ((hdr & 0xFFFF) == cap_id) return offset;
-        offset = (hdr >> 20) & 0xFFC;
-        if (offset < PCIE_EXT_CAP_START) break;
-    }
-    return 0;
+static inline void PCIWriteBYTE(u8 Bus, u8 Slot, u8 Func, u8 Offset, u8 Value)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
+    outb(PCI_CONFIG_DATA, Value);
 }
 
-static inline u64 pci_read_bar0(u8 bus, u8 slot, u8 func) {
-    u32 bar0_low = pci_read_dword(bus, slot, func, 0x10);
+static inline void PCIEnableDevice(u8 Bus, u8 Slot, u8 Func)
+{
+    u16 Command = PCIReadWORD(Bus, Slot, Func, 0x04);
+    Command |= (1 << 0) | (1 << 1) | (1 << 2);
+    PCIWriteWORD(Bus, Slot, Func, 0x04, Command);
+}
+
+u64 PCIGetBARAddress(u8 Bus, u8 Slot, u8 Func, u8 BarIndex) {
+    u32 barLow = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4);
     
-    if ((bar0_low & 0x7) == 0x4) {
-        u32 bar0_high = pci_read_dword(bus, slot, func, 0x14);
-        
-        u32 orig_low = bar0_low;
-        u32 orig_high = bar0_high;
-        
-        pci_write_dword(bus, slot, func, 0x10, 0xFFFFFFFF);
-        pci_write_dword(bus, slot, func, 0x14, 0xFFFFFFFF);
-        
-        u32 mask_low = pci_read_dword(bus, slot, func, 0x10);
-        u32 mask_high = pci_read_dword(bus, slot, func, 0x14);
-        
-        pci_write_dword(bus, slot, func, 0x10, orig_low);
-        pci_write_dword(bus, slot, func, 0x14, orig_high);
-        
-        u64 addr = ((u64)orig_high << 32) | (orig_low & ~0xFULL);
-        u64 size = (~(((u64)mask_high << 32) | (mask_low & ~0xFULL))) + 1;
-        
-        DebugStr("BAR0: 64-bit MMIO\n");
-        DebugStr("  Addr: 0x"); DebugU64(addr); DebugChar('\n');
-        DebugStr("  Size: 0x"); DebugU64(size); DebugChar('\n');
-        
-        return addr;
+    if ((barLow & 0x6) == 0x4) {
+        u32 barHigh = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4 + 4);
+        return ((u64)barHigh << 32) | (barLow & ~0xF);
     }
     
-    u32 orig_low = bar0_low;
-    pci_write_dword(bus, slot, func, 0x10, 0xFFFFFFFF);
-    u32 mask_low = pci_read_dword(bus, slot, func, 0x10);
-    pci_write_dword(bus, slot, func, 0x10, orig_low);
-    
-    u64 addr = orig_low & ~0xF;
-    u64 size = (~(mask_low & ~0xF)) + 1;
-    
-    DebugStr("BAR0: 32-bit MMIO\n");
-    DebugStr("  Addr: 0x"); DebugU64(addr); DebugChar('\n');
-    DebugStr("  Size: 0x"); DebugU64(size); DebugChar('\n');
-    
-    return addr;
+    return barLow & ~0xF;
 }
 
-typedef struct {
-    u8 bus, slot, func;
-    u64 mmio_base;
-    u16 vendor_id, device_id;
-} PCIDevice;
+static inline u64 PCIGetBARSize64(u8 Bus, u8 Slot, u8 Func, u8 BARIndex)
+{
+    u32 OriginalBAR_Low = PCIReadDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4);
+    u32 OriginalBAR_High = PCIReadDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4 + 4);
+    
+    PCIWriteDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4, 0xFFFFFFFF);
+    PCIWriteDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4 + 4, 0xFFFFFFFF);
+    
+    u32 SizeMask_Low = PCIReadDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4);
+    u32 SizeMask_High = PCIReadDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4 + 4);
+    
+    PCIWriteDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4, OriginalBAR_Low);
+    PCIWriteDWORD(Bus, Slot, Func, 0x10 + BARIndex * 4 + 4, OriginalBAR_High);
+    
+    u64 SizeMask = ((u64)SizeMask_High << 32) | (SizeMask_Low & 0xFFFFFFF0);
+    u64 Size = (~SizeMask + 1) & 0xFFFFFFF0;
+    
+    return Size;
+}
 
-PCIDevice pci_find_xhci(void);
+static inline void PCIScanBus(void)
+{
+    for (u16 Bus = 0; Bus < 256; Bus++)
+    {
+        for (u8 Dev = 0; Dev < 32; Dev++)
+        {
+            for (u8 Func = 0; Func < 8; Func++)
+            {
+                u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
+                u16 Vendor = VendorDevice & 0xFFFF;
+                
+                if (Vendor == 0xFFFF)
+                {
+                    if (Func == 0)
+                        break;
+                    continue;
+                }
+                
+                u32 ClassRev = PCIReadDWORD(Bus, Dev, Func, 0x08);
+                u8 ClassCode = (ClassRev >> 24) & 0xFF;
+                u8 SubClass = (ClassRev >> 16) & 0xFF;
+                
+                u32 Header = PCIReadDWORD(Bus, Dev, Func, 0x0C);
+                u8 HeaderType = (Header >> 16) & 0xFF;
+                
+                if (!(HeaderType & 0x80))
+                    break;
+            }
+        }
+    }
+}
+
+static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass)
+{
+    for (u16 Bus = 0; Bus < 256; Bus++)
+    {
+        for (u8 Dev = 0; Dev < 32; Dev++)
+        {
+            for (u8 Func = 0; Func < 8; Func++)
+            {
+                u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
+                if ((VendorDevice & 0xFFFF) == 0xFFFF)
+                {
+                    if (Func == 0) break;
+                    continue;
+                }
+                
+                u32 ClassRev = PCIReadDWORD(Bus, Dev, Func, 0x08);
+                u8 ClassCode = (ClassRev >> 24) & 0xFF;
+                u8 SubClass = (ClassRev >> 16) & 0xFF;
+                
+                if (ClassCode == TargetClass && SubClass == TargetSubClass)
+                {
+                    PCIEnableDevice(Bus, Dev, Func);
+                }
+            }
+        }
+    }
+}
+
+static inline void PCIScanBusRecursive(u8 Bus)
+{
+    for (u8 Dev = 0; Dev < 32; Dev++)
+    {
+        for (u8 Func = 0; Func < 8; Func++)
+        {
+            u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
+            if ((VendorDevice & 0xFFFF) == 0xFFFF)
+            {
+                if (Func == 0) break;
+                continue;
+            }
+            
+            u32 ClassRev = PCIReadDWORD(Bus, Dev, Func, 0x08);
+            u8 ClassCode = (ClassRev >> 24) & 0xFF;
+            u8 SubClass = (ClassRev >> 16) & 0xFF;
+            
+            if (ClassCode == 0x06 && SubClass == 0x04)
+            {
+                u32 SecondaryBus = PCIReadDWORD(Bus, Dev, Func, 0x18);
+                u8 SecondaryBusNum = (SecondaryBus >> 8) & 0xFF;
+                PCIScanBusRecursive(SecondaryBusNum);
+            }
+        }
+    }
+}

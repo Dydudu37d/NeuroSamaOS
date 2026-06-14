@@ -257,3 +257,12 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
     
     EFI_GOP_MODE *Mode;  // Fixed: was void*, now proper pointer type
 } EFI_GRAPHICS_OUTPUT_PROTOCOL;
+
+// MemoryDescriptor
+typedef struct {
+    u32 Type;
+    u64 PhysicalStart;
+    u64 VirtualStart;
+    u64 NumberOfPages;
+    u64 Attribute;
+} EFI_MEMORY_DESCRIPTOR;

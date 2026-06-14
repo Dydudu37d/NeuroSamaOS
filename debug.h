@@ -20,5 +20,7 @@ static inline void DebugChar(const char C) {
 
 void DebugStr(const char* S);
 void DebugU64(u64 LLU);
+void DebugU32(u32 LU);
+void DebugU16(u16 D);
 void DebugU8(u8 B);
 void DebugU64Bit(u64 LLU);
