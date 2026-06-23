@@ -67,16 +67,12 @@ void FPUInit(void){
 #define PAGE_WRITABLE (1ULL << 1)
 #define PAGE_HUGE     (1ULL << 7)
 
-u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs)
-{
-    const u64 GB = 1024ULL * 1024 * 1024;
-    u64 bytes_per_pdpt = 512ULL * GB;
+u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs) {
+    u64 bytes_per_pdpt = 512ULL * 1024ULL * 1024ULL * 1024ULL;
     u64 pdpt_count = (MaxPhysMem + bytes_per_pdpt - 1) / bytes_per_pdpt;
     if (pdpt_count == 0) pdpt_count = 1;
     if (pdpt_count > 512) pdpt_count = 512;
-
     u64 total_pages_needed = 1 + pdpt_count;
-
     EFI_PHYSICAL_ADDRESS allocated_buffer = 0;
     EFI_STATUS status = bs->AllocatePages(
         AllocateAnyPages,
@@ -84,43 +80,31 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs)
         total_pages_needed,
         &allocated_buffer
     );
-
     if (EFI_ERROR(status) || allocated_buffer == 0) {
-        DebugStr("[CRITICAL] Failed to allocate page table memory!\r\n");
+        DebugStr("[CRITICAL] Failed to allocate dynamic page table memory!\r\n");
         while(1);
     }
 
-    u8* BasePtr = (u8*)allocated_buffer;
-    u64* pml4 = (u64*)BasePtr;
-    MemSet64(pml4, 0, 512);
+    u64* pml4 = (u64*)allocated_buffer;
+    MemSet64(pml4,0,512);
 
+    u64* pdpt_base = (u64*)(allocated_buffer + 4096);
     for (u64 i = 0; i < pdpt_count; i++) {
-        u64* pdpt = (u64*)(BasePtr + 4096 + i * 4096);
-        MemSet64(pdpt, 0, 512);
+        u64* pdpt = pdpt_base + (i * 512);
+        
+        MemSet64(pdpt,0,512);
+
         pml4[i] = ((u64)pdpt) | PAGE_PRESENT | PAGE_WRITABLE;
     }
 
-    u64 table_start = allocated_buffer;
-    u64 table_end   = allocated_buffer + total_pages_needed * 4096;
-    u64 pt_gb_start = (table_start / GB) * GB;
-
-    for (u64 phys = pt_gb_start; phys < table_end; phys += GB) {
+    for (u64 phys = 0; phys < MaxPhysMem; phys += 1024ULL * 1024 * 1024) {
         u32 pml4_idx = (phys >> 39) & 0x1FF;
         u32 pdpt_idx = (phys >> 30) & 0x1FF;
-        if (pml4_idx >= pdpt_count) continue;
-        u64* pdpt = (u64*)(pml4[pml4_idx] & 0xFFFFFFFFFFFFF000ULL);
-        pdpt[pdpt_idx] = phys | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
-    }
-
-    u64 mapping_limit = pdpt_count * bytes_per_pdpt;
-    u64 effective_max = (MaxPhysMem < mapping_limit) ? MaxPhysMem : mapping_limit;
-
-    for (u64 phys = 0; phys < effective_max; phys += GB) {
-        u32 pml4_idx = (phys >> 39) & 0x1FF;
-        u32 pdpt_idx = (phys >> 30) & 0x1FF;
+        
         if (pml4_idx >= pdpt_count) break;
-        u64* pdpt = (u64*)(pml4[pml4_idx] & 0xFFFFFFFFFFFFF000ULL);
-        pdpt[pdpt_idx] = phys | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
+        
+        u64* target_pdpt = (u64*)(pml4[pml4_idx] & ~0xFFFULL);
+        target_pdpt[pdpt_idx] = phys | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
     }
 
     return pml4;
@@ -172,7 +156,7 @@ void kernel_main() {
 
     while(1){
         TaskPoll();
-        GOPClearAlpha(0x80000000);
+        DebugStr("Poll Tasks.\n");
         GOPClearAlpha(0x80FF0000);
         GOPFlash();
     }
@@ -260,13 +244,13 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     void (*entry_point)(void) = kernel_main;
 
     u64 StackTop = (u64)KernelStack + 64*1024*1024;
-    u64 StackBottom = (u64)KernelStack;
+
     asm volatile(
         "movq %0, %%rsp\n\t"
-        "movq %1, %%rbp\n\t"
-        "jmp *%2\n\t"
+        "movq %0, %%rbp\n\t"
+        "jmp *%1\n\t"
         :
-        : "r"(StackTop), "r"(StackBottom), "r"(entry_point)
+        : "r"(StackTop), "r"(entry_point)
         : "memory"
     );
     return 0;

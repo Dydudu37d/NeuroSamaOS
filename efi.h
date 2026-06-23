@@ -266,3 +266,30 @@ typedef struct {
     u64 NumberOfPages;
     u64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
+
+//=============================================================================
+//  Loaded Image Protocol (Full Definition)
+//=============================================================================
+static const EFI_GUID gEfiLoadedImageProtocolGuid = {
+    0x5B1B31A1,
+    0x9562,
+    0x11D2,
+    { 0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B }
+};
+
+typedef struct {
+    u32        Revision;
+    u32        _pad0;
+    EFI_HANDLE ParentHandle;
+    void       *SystemTable;
+    EFI_HANDLE DeviceHandle;
+    void       *FilePath;
+    void       *Reserved;
+    u32        LoadOptionsSize;
+    u32        _pad1;
+    void       *LoadOptions;
+    void       *ImageBase;
+    u64        ImageSize;
+    u64        ImageMemoryType;
+    EFI_STATUS (EFIAPI *Unload)(EFI_HANDLE ImageHandle);
+} EFI_LOADED_IMAGE_PROTOCOL;

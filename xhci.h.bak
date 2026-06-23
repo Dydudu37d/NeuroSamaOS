@@ -76,14 +76,6 @@ typedef struct XhciDeviceContext {
     XhciEndpointContext Ep[31];
 } __attribute__((packed)) XhciDeviceContext;
 
-typedef struct {
-    XhciTrb* Ring;
-    u32 Enqueue;
-    u32 Cycle;
-    u32 RingSize;
-    u64 RingPhys;
-} XhciEpRing;
-
 typedef struct XhciController {
     u64 MmioBase;
     XhciCapRegs* Cap;
@@ -106,8 +98,6 @@ typedef struct XhciController {
     u32 EvCycle;
     u32 EvRingSize;
     u32 CmdRingSize;
-    
-    XhciEpRing EpRings[256];
 } XhciController;
 
 typedef struct UsbDeviceDescriptor {

@@ -15,8 +15,37 @@ void StrAdd(char* Add,const char* S,size_t size){
     Add[start + size] = '\0';
 }
 
+void MemCopySize32CountByte(u32* D, const u32* S, size_t size_bytes) {
+    if (size_bytes >= 2000000 && ((u64)D & 0x1F) == 0 && (size_bytes & 0x1F) == 0 && ((u64)S & 0x1F) == 0) {
+        size_t loops = size_bytes / 32;
+
+        __asm__ __volatile__(
+            "1:\n\t"
+            "vmovdqa (%1), %%ymm0\n\t"
+            "vmovntdq %%ymm0, (%0)\n\t"
+            "addq $32, %0\n\t"
+            "addq $32, %1\n\t"
+            "decq %2\n\t"
+            "jnz 1b\n\t"
+            "vzeroupper\n\t"
+            "sfence"
+            : "+r"(D), "+r"(S), "+r"(loops)
+            :: "ymm0", "memory"
+        );
+    } 
+    else {
+        size_t dwords = size_bytes / 4; 
+        __asm__ __volatile__(
+            "cld\n\t"
+            "rep movsl"
+            : "+D"(D), "+S"(S), "+c"(dwords)
+            :: "memory"
+        );
+    }
+}
+
 void MemCopy(void* D, const void* S, size_t size) {
-    if (size >= 2000000 && ((u64)D & 0x1F) == 0) {
+    if (size >= 2000000 && ((u64)D & 0x1F) == 0 && ((u64)S & 0x1F) == 0) {
         size_t loops = size / 32;
         size_t remainder = size % 32;
 

@@ -17,4 +17,5 @@ struct IDTR {
 } __attribute__((packed));
 
 void InitIDT();
+void InitInterruptSystem();
 void IDTCloseError(void);

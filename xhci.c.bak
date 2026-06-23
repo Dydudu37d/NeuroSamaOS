@@ -8,20 +8,6 @@
 
 extern AllocPool KernelPool;
 
-static void XhciRingDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId) {
-    u64 doorbell = Xhci->DoorbellBase + (SlotId * 4);
-    *(volatile u32*)doorbell = (u32)EpId;
-    __asm__ volatile("mfence" ::: "memory");
-}
-
-static void XhciAdvanceEnqueue(XhciEpRing* ring, u32 count) {
-    ring->Enqueue += count;
-    if (ring->Enqueue >= ring->RingSize) {
-        ring->Enqueue = 0;
-        ring->Cycle ^= 1;
-    }
-}
-
 u64 XhciGetMmioBase(u8 Bus, u8 Slot, u8 Func) {
     return PCIGetBARAddress(Bus, Slot, Func, 0);
 }
@@ -71,14 +57,6 @@ XhciController* XhciInit(u64 MmioBase) {
     if (!xhci) {
         DebugStr("XHCI ALLOC FAILED\n");
         return NULL;
-    }
-
-    for (int i = 0; i < 32; i++) {
-        xhci->EpRings[i].Ring = NULL;
-        xhci->EpRings[i].RingSize = 0;
-        xhci->EpRings[i].Enqueue = 0;
-        xhci->EpRings[i].Cycle = 1;
-        xhci->EpRings[i].RingPhys = 0;
     }
 
     xhci->MmioBase = MmioBase;
@@ -176,9 +154,10 @@ u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event) {
 
     u64 erdp = (u64)&Xhci->EvRing[Xhci->EvDequeue];
     erdp &= ~0xFULL;
-    *(volatile u64*)(Xhci->RtBase + 0x38) = erdp | 1;
+    *(volatile u64*)(Xhci->RtBase + 0x38) = erdp;
 
     MemFullFlash();
+
     return 1;
 }
 
@@ -248,36 +227,39 @@ u8 XhciAddressDevice(XhciController* Xhci, u8 SlotId, XhciInputContext* InputCtx
     return 0xFF;
 }
 
-static u8 XhciAllocEp0Ring(XhciController* Xhci, u8 SlotId) {
-    if (SlotId >= 32) return 0;
-    
-    XhciEpRing* ring = &Xhci->EpRings[SlotId];
-    ring->RingSize = 64;
-    ring->Ring = (XhciTrb*)AlignedAlloc(&KernelPool, sizeof(XhciTrb) * ring->RingSize, 64);
-    if (!ring->Ring) return 0;
-    
-    MemSet(ring->Ring, 0, sizeof(XhciTrb) * ring->RingSize);
-    ring->Enqueue = 0;
-    ring->Cycle = 1;
-    ring->RingPhys = (u64)ring->Ring;
-    
-    return 1;
+void XhciScanPorts(XhciController* Xhci) {
+    u8 maxPorts = (u8)((Xhci->Cap->Hcsparams1 >> 24) & 0xFF);
+
+    for (u8 i = 1; i <= maxPorts; i++) {
+        XhciPortRegs* port = &Xhci->Ports[i - 1];
+        u32 portsc = port->Portsc;
+
+        if (portsc != 0) {
+            portsc &= ~0x0E01CE0E;
+            portsc |= XHCI_PORTSC_PR;
+            port->Portsc = portsc;
+
+            SystemBusySleepMs(20);
+
+            portsc = port->Portsc;
+            if (portsc & XHCI_PORTSC_PED) {
+                u8 speed = (portsc >> 10) & 0x0F;
+                XhciEnumerateDevice(Xhci, i, speed);
+            }
+        }
+    }
 }
 
 u8 XhciEnumerateDevice(XhciController* Xhci, u8 PortId, u8 Speed) {
     u8 slotId = XhciEnableSlot(Xhci);
-    if (slotId == 0) return 0;
-
-    if (!XhciAllocEp0Ring(Xhci, slotId)) {
+    if (slotId == 0) {
         return 0;
     }
 
     XhciDeviceContext* devCtx = (XhciDeviceContext*)AlignedAlloc(&KernelPool, sizeof(XhciDeviceContext), 64);
-    MemSet(devCtx, 0, sizeof(XhciDeviceContext));
     Xhci->Dcbaa->DevCtxPtr[slotId] = (u64)devCtx;
 
     XhciInputContext* inputCtx = (XhciInputContext*)AlignedAlloc(&KernelPool, sizeof(XhciInputContext), 64);
-    MemSet(inputCtx, 0, sizeof(XhciInputContext));
     inputCtx->InputCtrl.AddFlags = (1 << 0) | (1 << 1);
 
     inputCtx->Slot.DevInfo = (PortId << 16) | (1 << 27);
@@ -289,81 +271,146 @@ u8 XhciEnumerateDevice(XhciController* Xhci, u8 PortId, u8 Speed) {
     if (Speed == XHCI_PORTSPEED_SUPER) maxPacketSize = 512;
     else if (Speed == XHCI_PORTSPEED_HIGH) maxPacketSize = 64;
 
-    XhciEpRing* ring = &Xhci->EpRings[slotId];
     inputCtx->Ep[0].EpInfo2 = (maxPacketSize << 16) | (4 << 3) | 3;
-    inputCtx->Ep[0].DequeueLow = (u32)(ring->RingPhys & 0xFFFFFFFF) | 1;
-    inputCtx->Ep[0].DequeueHigh = (u32)(ring->RingPhys >> 32);
 
     u8 code = XhciAddressDevice(Xhci, slotId, inputCtx);
     if (code != XHCI_CMPLT_SUCCESS) {
-        Free(&KernelPool, devCtx);
-        Free(&KernelPool, inputCtx);
         return 0;
     }
 
-    Free(&KernelPool, inputCtx);
     XhciParseDevice(Xhci, slotId);
+
     return slotId;
 }
 
-u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, void* Buffer) {
-    XhciEpRing* ring = &Xhci->EpRings[SlotId];
-    if (!ring->Ring) return 0xFF;
-    
-    u32 enqueue = ring->Enqueue;
-    u32 cycle = ring->Cycle;
-    u32 size = ring->RingSize;
-    XhciTrb* trb;
+void XhciPollEvents(XhciController* Xhci) {
+    while (1) {
+        XhciTrb Event;
+        if (!XhciReadEvent(Xhci, &Event)) {
+            break;
+        }
 
-    trb = &ring->Ring[enqueue];
-    trb->ParameterLow = ((u32)bRequest << 8) | bmRequestType;
-    trb->ParameterHigh = ((u32)wIndex << 16) | wValue;
-    trb->Status = wLength;
-    trb->Control = (XHCI_TRB_SETUP << 10) | (3 << 16) | cycle;
-    enqueue = (enqueue + 1) % size;
-    if (enqueue == 0) cycle ^= 1;
+        u8 Type = (Event.Control >> 10) & 0x3F;
+        u8 SlotId = (Event.Control >> 24) & 0xFF;
+        u8 CompletionCode = (Event.Status >> 24) & 0xFF;
+
+        switch (Type) {
+            case XHCI_TRB_COMMAND_COMPLETE:
+                break;
+
+            case XHCI_TRB_TRANSFER_EVENT:
+                break;
+
+            case XHCI_TRB_PORT_STATUS_CHANGE: {
+                u32 PortId = (Event.Status >> 16) & 0xFF;
+                XhciPortRegs* Port = &Xhci->Ports[PortId - 1];
+                u32 Portsc = Port->Portsc;
+
+                if (Portsc & XHCI_PORTSC_CSC) {
+                    if (Portsc & XHCI_PORTSC_CCS) {
+                        u8 Speed = (Portsc >> 10) & 0x0F;
+                        XhciEnumerateDevice(Xhci, PortId, Speed);
+                    }
+                    Portsc |= XHCI_PORTSC_CSC;
+                    Port->Portsc = Portsc;
+                }
+
+                if (Portsc & XHCI_PORTSC_PRC) {
+                    Portsc |= XHCI_PORTSC_PRC;
+                    Port->Portsc = Portsc;
+                }
+
+                if (Portsc & XHCI_PORTSC_PEC) {
+                    Portsc |= XHCI_PORTSC_PEC;
+                    Port->Portsc = Portsc;
+                }
+
+                if (Portsc & XHCI_PORTSC_WRC) {
+                    Portsc |= XHCI_PORTSC_WRC;
+                    Port->Portsc = Portsc;
+                }
+                break;
+            }
+        }
+    }
+}
+
+u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, void* Buffer) {
+    u32 setupIndex = Xhci->CmdEnqueue;
+    XhciTrb* setupTrb = &Xhci->CmdRing[setupIndex];
+    setupTrb->ParameterLow = ((u32)bRequest << 8) | bmRequestType;
+    setupTrb->ParameterHigh = ((u32)wIndex << 16) | wValue;
+    setupTrb->Status = wLength;
+    setupTrb->Control = (XHCI_TRB_SETUP << 10) | (3 << 16) | Xhci->CmdCycle;
+
+    Xhci->CmdEnqueue++;
+    if (Xhci->CmdEnqueue >= Xhci->CmdRingSize - 1) {
+        XhciTrb* link = &Xhci->CmdRing[Xhci->CmdEnqueue];
+        link->ParameterLow = (u32)((u64)Xhci->CmdRing & 0xFFFFFFFF);
+        link->ParameterHigh = (u32)((u64)Xhci->CmdRing >> 32);
+        link->Status = 0;
+        link->Control = (XHCI_TRB_LINK << 10) | (1 << 1) | Xhci->CmdCycle;
+        Xhci->CmdEnqueue = 0;
+        Xhci->CmdCycle ^= 1;
+    }
+
+    u32 dataCycle = Xhci->CmdCycle;
+    u32 dataEnqueue = Xhci->CmdEnqueue;
 
     if (wLength > 0) {
         u32 dir = (bmRequestType & 0x80) ? (1 << 16) : 0;
         u64 bufferPhys = (u64)Buffer;
-        
-        trb = &ring->Ring[enqueue];
-        trb->ParameterLow = (u32)(bufferPhys & 0xFFFFFFFF);
-        trb->ParameterHigh = (u32)(bufferPhys >> 32);
-        trb->Status = wLength;
-        trb->Control = (XHCI_TRB_DATA << 10) | dir | (1 << 17) | cycle;
-        enqueue = (enqueue + 1) % size;
-        if (enqueue == 0) cycle ^= 1;
+
+        XhciTrb* dataTrb = &Xhci->CmdRing[dataEnqueue];
+        dataTrb->ParameterLow = (u32)(bufferPhys & 0xFFFFFFFF);
+        dataTrb->ParameterHigh = (u32)(bufferPhys >> 32);
+        dataTrb->Status = wLength;
+        dataTrb->Control = (XHCI_TRB_DATA << 10) | dir | (1 << 17) | dataCycle;
+
+        Xhci->CmdEnqueue++;
+        if (Xhci->CmdEnqueue >= Xhci->CmdRingSize - 1) {
+            XhciTrb* link = &Xhci->CmdRing[Xhci->CmdEnqueue];
+            link->ParameterLow = (u32)((u64)Xhci->CmdRing & 0xFFFFFFFF);
+            link->ParameterHigh = (u32)((u64)Xhci->CmdRing >> 32);
+            link->Status = 0;
+            link->Control = (XHCI_TRB_LINK << 10) | (1 << 1) | dataCycle;
+            Xhci->CmdEnqueue = 0;
+            Xhci->CmdCycle ^= 1;
+        }
     }
 
-    trb = &ring->Ring[enqueue];
-    trb->ParameterLow = 0;
-    trb->ParameterHigh = 0;
-    trb->Status = 0;
-    trb->Control = (XHCI_TRB_STATUS << 10) | (1 << 16) | cycle;
-    enqueue = (enqueue + 1) % size;
-    if (enqueue == 0) cycle ^= 1;
+    u32 statusCycle = Xhci->CmdCycle;
+    XhciTrb* statusTrb = &Xhci->CmdRing[Xhci->CmdEnqueue];
+    statusTrb->ParameterLow = 0;
+    statusTrb->ParameterHigh = 0;
+    statusTrb->Status = 0;
+    statusTrb->Control = (XHCI_TRB_STATUS << 10) | (1 << 16) | statusCycle;
 
-    ring->Enqueue = enqueue;
-    ring->Cycle = cycle;
+    Xhci->CmdEnqueue++;
+    if (Xhci->CmdEnqueue >= Xhci->CmdRingSize - 1) {
+        XhciTrb* link = &Xhci->CmdRing[Xhci->CmdEnqueue];
+        link->ParameterLow = (u32)((u64)Xhci->CmdRing & 0xFFFFFFFF);
+        link->ParameterHigh = (u32)((u64)Xhci->CmdRing >> 32);
+        link->Status = 0;
+        link->Control = (XHCI_TRB_LINK << 10) | (1 << 1) | statusCycle;
+        Xhci->CmdEnqueue = 0;
+        Xhci->CmdCycle ^= 1;
+    }
 
-    XhciRingDoorbell(Xhci, SlotId, 0);
+    *(volatile u32*)(Xhci->DoorbellBase + (SlotId * 4)) = 1;
 
     u32 timeout = 1000000;
     XhciTrb ev;
     while (timeout--) {
         if (XhciReadEvent(Xhci, &ev)) {
             u8 type = (ev.Control >> 10) & 0x3F;
-            if (type == XHCI_TRB_TRANSFER_EVENT) {
-                u8 slot = (ev.Control >> 24) & 0xFF;
-                if (slot == SlotId) {
-                    return (ev.Status >> 24) & 0xFF;
-                }
+            if (type == XHCI_TRB_COMMAND_COMPLETE || type == XHCI_TRB_TRANSFER_EVENT) {
+                return (ev.Status >> 24) & 0xFF;
             }
         }
-        __asm__ volatile("pause");
+        __asm__ volatile ("pause");
     }
-    
+
     return 0xFF;
 }
 
@@ -417,70 +464,4 @@ void XhciParseDevice(XhciController* Xhci, u8 SlotId) {
     }
 
     Free(&KernelPool, configDesc);
-}
-
-void XhciPollEvents(XhciController* Xhci) {
-    XhciTrb Event;
-    
-    while (XhciReadEvent(Xhci, &Event)) {
-        u8 Type = (Event.Control >> 10) & 0x3F;
-        u8 SlotId = (Event.Control >> 24) & 0xFF;
-        u8 CompletionCode = (Event.Status >> 24) & 0xFF;
-
-        switch (Type) {
-            case XHCI_TRB_COMMAND_COMPLETE:
-                break;
-
-            case XHCI_TRB_TRANSFER_EVENT:
-                break;
-
-            case XHCI_TRB_PORT_STATUS_CHANGE: {
-                u32 PortId = (Event.Status >> 16) & 0xFF;
-                XhciPortRegs* Port = &Xhci->Ports[PortId - 1];
-                u32 Portsc = Port->Portsc;
-
-                if (Portsc & XHCI_PORTSC_CSC) {
-                    if (Portsc & XHCI_PORTSC_CCS) {
-                        u8 Speed = (Portsc >> 10) & 0x0F;
-                        XhciEnumerateDevice(Xhci, PortId, Speed);
-                    }
-                    Port->Portsc = Portsc | XHCI_PORTSC_CSC;
-                }
-
-                if (Portsc & XHCI_PORTSC_PRC) {
-                    Port->Portsc = Portsc | XHCI_PORTSC_PRC;
-                }
-
-                if (Portsc & XHCI_PORTSC_PEC) {
-                    Port->Portsc = Portsc | XHCI_PORTSC_PEC;
-                }
-
-                if (Portsc & XHCI_PORTSC_WRC) {
-                    Port->Portsc = Portsc | XHCI_PORTSC_WRC;
-                }
-                break;
-            }
-        }
-    }
-}
-
-void XhciScanPorts(XhciController* Xhci) {
-    u8 maxPorts = (u8)((Xhci->Cap->Hcsparams1 >> 24) & 0xFF);
-
-    for (u8 i = 1; i <= maxPorts; i++) {
-        XhciPortRegs* port = &Xhci->Ports[i - 1];
-        u32 portsc = port->Portsc;
-
-        if (portsc != 0 && (portsc & XHCI_PORTSC_CCS)) {
-            portsc |= XHCI_PORTSC_PR;
-            port->Portsc = portsc;
-            SystemBusySleepMs(20);
-
-            portsc = port->Portsc;
-            if (portsc & XHCI_PORTSC_PED) {
-                u8 speed = (portsc >> 10) & 0x0F;
-                XhciEnumerateDevice(Xhci, i, speed);
-            }
-        }
-    }
 }

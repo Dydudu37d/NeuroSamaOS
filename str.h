@@ -3,6 +3,7 @@
 
 void PingPong(void** Ping,void** Pong);
 void MemCopy(void* D,const void* S,size_t size);
+void MemCopySize32CountByte(u32* D,const u32* S,size_t size_bytes);
 void StrAdd(char* Add,const char* S,size_t size);
 void MemSet(void* D,const u8 S,size_t size);
 void MemSet16(void* D,const u16 S,size_t size);

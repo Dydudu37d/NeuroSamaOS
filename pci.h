@@ -54,7 +54,7 @@ static inline void PCIEnableDevice(u8 Bus, u8 Slot, u8 Func)
     PCIWriteWORD(Bus, Slot, Func, 0x04, Command);
 }
 
-u64 PCIGetBARAddress(u8 Bus, u8 Slot, u8 Func, u8 BarIndex) {
+static inline u64 PCIGetBARAddress(u8 Bus, u8 Slot, u8 Func, u8 BarIndex) {
     u32 barLow = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4);
     
     if ((barLow & 0x6) == 0x4) {

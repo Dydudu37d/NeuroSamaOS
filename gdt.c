@@ -5,10 +5,11 @@ struct GDTR {
     u64 base;
 } __attribute__((packed));
 
-static struct GDTEntry gdt[3] = {
+static struct GDTEntry gdt[6] = {
     {0, 0, 0, 0, 0, 0},
     {0, 0, 0, 0x9A, 0, 0},
-    {0, 0, 0, 0x92, 0, 0}
+    {0, 0, 0, 0x92, 0, 0},
+    {0},{0},{0}
 };
 
 static struct GDTR gdtr;

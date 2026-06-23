@@ -8,6 +8,7 @@ Erm
 - SSE1 ~ SSE4.2
 - NT (Non-temporal instructions)
 - ERMS (REP MOVS/STOS)
+- FPU
 
 ## Build
 ```bash
