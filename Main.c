@@ -93,8 +93,8 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs)
     u8* BasePtr = (u8*)allocated_buffer;
     u64* pml4 = (u64*)BasePtr;
     MemSet64(pml4, 0, 512);
-
-    for (u64 i = 0; i < pdpt_count; i++) {
+    
+    for (u64 i = 1; i < pdpt_count; i++) {
         u64* pdpt = (u64*)(BasePtr + 4096 + i * 4096);
         MemSet64(pdpt, 0, 512);
         pml4[i] = ((u64)pdpt) | PAGE_PRESENT | PAGE_WRITABLE;
@@ -115,7 +115,7 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs)
     u64 mapping_limit = pdpt_count * bytes_per_pdpt;
     u64 effective_max = (MaxPhysMem < mapping_limit) ? MaxPhysMem : mapping_limit;
 
-    for (u64 phys = 0; phys < effective_max; phys += GB) {
+    for (u64 phys = 1; phys < effective_max; phys += GB) {
         u32 pml4_idx = (phys >> 39) & 0x1FF;
         u32 pdpt_idx = (phys >> 30) & 0x1FF;
         if (pml4_idx >= pdpt_count) break;
@@ -205,7 +205,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         
         DebugStr("\r\n[NeuroSamaOS] UEFI LOADED IMAGE BASE: ");
         DebugU64(TrueImageBase);
-        DebugStr("[NeuroSamaOS] IMAGE SIZE: ");
+        DebugStr("\r\n[NeuroSamaOS] IMAGE SIZE: ");
         DebugU64(TrueImageSize);
         
     } else {
@@ -237,7 +237,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     }
     DebugStr("MaxPhysicalAddress: ");DebugU64(MaxPhysicalAddress);DebugChar('\n');
     
-    u64 *pml4=BuildDynamicPageTable(MaxPhysicalAddress, bs);
+    u64 *pml4=BuildDynamicPageTable(MaxPhysicalAddress+10, bs);
 
     ExitBootServices_Safe(image);
     asm volatile("cli\n\t");

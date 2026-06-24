@@ -4,11 +4,14 @@ A UEFI Operating System for Neuro-Sama
 Erm
 
 ## We have:
-- AVX2
+- AVX256
 - SSE1 ~ SSE4.2
 - NT (Non-temporal instructions)
-- ERMS (REP MOVS/STOS)
+- ERMS FRMS (REP MOVS/STOS)
 - FPU
+- JIT
+- HolyC-JIT
+- FishC-JIT
 
 ## Build
 ```bash

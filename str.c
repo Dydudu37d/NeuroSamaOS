@@ -21,7 +21,7 @@ void MemCopySize32CountByte(u32* D, const u32* S, size_t size_bytes) {
 
         __asm__ __volatile__(
             "1:\n\t"
-            "vmovdqa (%1), %%ymm0\n\t"
+            "vmovntdqa (%1), %%ymm0\n\t"
             "vmovntdq %%ymm0, (%0)\n\t"
             "addq $32, %0\n\t"
             "addq $32, %1\n\t"
@@ -51,7 +51,7 @@ void MemCopy(void* D, const void* S, size_t size) {
 
         __asm__ __volatile__(
             "1:\n\t"
-            "vmovdqu (%1), %%ymm0\n\t"
+            "vmovntdqa (%1), %%ymm0\n\t"
             "vmovntdq %%ymm0, (%0)\n\t"
             "addq $32, %0\n\t"
             "addq $32, %1\n\t"
@@ -196,4 +196,24 @@ void Bit64Str(u64 N,char* Buf,size_t size){
         Buf[idx]=(N&1ULL<<idx)?49:48;
     }
     Buf[size]='\0';
+}
+
+_Bool StrIs(const char* D, const char* S) {
+    if (!D || !S) return D == S;
+    while (*D && *S) {
+        if (*D != *S) return 0;
+        D++;
+        S++;
+    }
+    return *D == *S;
+}
+
+u64 StrLen(const char* S) {
+    if (!S) return 0;
+    u64 len = 0;
+    while (*S) {
+        len++;
+        S++;
+    }
+    return len;
 }
