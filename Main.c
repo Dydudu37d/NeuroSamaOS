@@ -4,7 +4,6 @@
 #include "int.h"
 #include "str.h"
 #include "debug.h"
-#include "clock.h"
 #include "pci.h"
 #include "xhci.h"
 #include "kmalloc.h"
@@ -12,6 +11,9 @@
 #include "idt.h"
 #include "Context.h"
 #include "task.h"
+#include "ata.h"
+#include "gpt.h"
+#include "fat32.h"
 #include "mouse.h"
 #include "keyboard.h"
 #include "ohci.h"
@@ -62,10 +64,6 @@ void FPUInit(void){
     asm volatile("mov %0, %%cr0" : : "r"(cr0));
 }
 #pragma clang optimize on
-
-#define PAGE_PRESENT  (1ULL << 0)
-#define PAGE_WRITABLE (1ULL << 1)
-#define PAGE_HUGE     (1ULL << 7)
 
 u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs)
 {
@@ -169,7 +167,11 @@ void kernel_main() {
     XhciController* Xhci = XhciInit(GetXhciMmioBase());
     if (Xhci) XhciScanPorts(Xhci);
     DebugStr("XhciScanPorts Finsh.\n");
-
+    ATAInit();
+    if (GPTDetect(0, 0)) Fat32Init(0, 0);
+    if (GPTDetect(0, 1)) Fat32Init(0, 1);
+    if (GPTDetect(1, 0)) Fat32Init(1, 0);
+    if (GPTDetect(1, 1)) Fat32Init(1, 1);
     while(1){
         TaskPoll();
         GOPClearAlpha(0x80000000);

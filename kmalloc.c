@@ -69,18 +69,22 @@ void* Alloc(AllocPool* Pool, size_t size) {
 void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align) {
     if (!Pool || !size) return NULL;
     if (align < 8) align = 8;
-    
     size = (size + 7) & ~7;
-    
+
     AllocBlock* curr = Pool->Head;
     while (curr) {
         if (curr->is_free && curr->size >= size) {
             u64 block_start = (u64)curr + sizeof(AllocBlock);
-            u64 aligned_ptr = (block_start + align - 1) & ~(align - 1);
-            size_t padding = aligned_ptr - block_start;
             
+            u64 aligned_ptr = (block_start + 8 + align - 1) & ~(align - 1);
+            size_t padding = aligned_ptr - block_start;
+
             if (curr->size >= size + padding) {
-                return DoSplit(curr, (void*)aligned_ptr, size);
+                void* res = DoSplit(curr, (void*)aligned_ptr, size);
+                if (res) {
+                    *(AllocBlock**)((u8*)res - 8) = curr;
+                }
+                return res;
             }
         }
         curr = curr->next;
@@ -91,10 +95,9 @@ void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align) {
 void Free(AllocPool* Pool, void* ptr) {
     if (!ptr || !Pool) return;
     
-    AllocBlock* block = (AllocBlock*)((u8*)ptr - sizeof(AllocBlock));
+    AllocBlock* block = *(AllocBlock**)((u8*)ptr - 8); 
     
     if (block->is_free) return;
-    
     block->is_free = 1;
     MergeFreeBlocks(Pool, block);
 }
