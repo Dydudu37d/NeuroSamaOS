@@ -2,6 +2,9 @@
 
 #define PCI_CONFIG_ADDRESS 0xCF8
 #define PCI_CONFIG_DATA    0xCFC
+#define PCI_BRIDGE_PRIMARY_BUS    0x18
+#define PCI_BRIDGE_SECONDARY_BUS  0x19
+#define PCI_BRIDGE_SUBORDINATE_BUS 0x1A
 
 #include "port.h"
 #include "int.h"
@@ -23,22 +26,29 @@ static inline void PCIWriteDWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset, u32 Value)
     outl(PCI_CONFIG_DATA, Value);
 }
 
-static inline u16 PCIReadWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset)
-{
-    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
-    return inw(PCI_CONFIG_DATA);
-}
-
 static inline void PCIWriteWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset, u16 Value)
 {
     outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
     outw(PCI_CONFIG_DATA, Value);
 }
 
+static inline u16 PCIReadWORD(u8 Bus, u8 Slot, u8 Func, u8 Offset)
+{
+    outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
+    u32 dword = inl(PCI_CONFIG_DATA);
+    if (Offset & 0x2) {
+        return (dword >> 16) & 0xFFFF;
+    } else {
+        return dword & 0xFFFF;
+    }
+}
+
 static inline u8 PCIReadBYTE(u8 Bus, u8 Slot, u8 Func, u8 Offset)
 {
     outl(PCI_CONFIG_ADDRESS, PCIAddr(Bus, Slot, Func, Offset));
-    return inb(PCI_CONFIG_DATA);
+    u32 dword = inl(PCI_CONFIG_DATA);
+    u8 shift = (Offset & 0x3) * 8;
+    return (dword >> shift) & 0xFF;
 }
 
 static inline void PCIWriteBYTE(u8 Bus, u8 Slot, u8 Func, u8 Offset, u8 Value)
@@ -170,4 +180,28 @@ static inline void PCIScanBusRecursive(u8 Bus)
             }
         }
     }
+}
+
+static inline u8 PCIReadBusNumber(u8 Bus, u8 Slot, u8 Func) {
+    u32 busReg = PCIReadDWORD(Bus, Slot, Func, 0x18);
+    return (busReg >> 8) & 0xFF;
+}
+
+static inline _Bool PCIIsBridge(u8 Bus, u8 Slot, u8 Func) {
+    u32 ClassRev = PCIReadDWORD(Bus, Slot, Func, 0x08);
+    u8 ClassCode = (ClassRev >> 24) & 0xFF;
+    u8 SubClass = (ClassRev >> 16) & 0xFF;
+    return (ClassCode == 0x06 && SubClass == 0x04);
+}
+
+static inline u8 PCIGetPrimaryBus(u8 Bus, u8 Slot, u8 Func) {
+    return PCIReadBYTE(Bus, Slot, Func, PCI_BRIDGE_PRIMARY_BUS);
+}
+
+static inline u8 PCIGetSecondaryBus(u8 Bus, u8 Slot, u8 Func) {
+    return PCIReadBYTE(Bus, Slot, Func, PCI_BRIDGE_SECONDARY_BUS);
+}
+
+static inline u8 PCIGetSubordinateBus(u8 Bus, u8 Slot, u8 Func) {
+    return PCIReadBYTE(Bus, Slot, Func, PCI_BRIDGE_SUBORDINATE_BUS);
 }

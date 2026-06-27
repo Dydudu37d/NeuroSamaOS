@@ -18,6 +18,7 @@
 #include "keyboard.h"
 #include "ohci.h"
 #include "hda.h"
+#include "gm206.h"
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
@@ -26,8 +27,8 @@
 
 #define POOL_PHYS_START 0x04000000ULL
 
-u32* GopOut=NULL;
-u32* GopBack=NULL;
+void* GopOut=NULL;
+HDR_PIXEL* GopBack=NULL;
 
 EFI_BOOT_SERVICES *bs=NULL;
 EFI_GOP_MODE GopMode={0};
@@ -36,6 +37,12 @@ EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop=NULL;
 
 EFI_GUID GopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 RegContext MainGlobalContext={0};
+
+#define PAGE_SIZE_4KB  0x1000ULL
+#define PAGE_SIZE_2MB  0x200000ULL
+#define PAGE_SIZE_1GB  0x40000000ULL
+#define PAGE_SIZE_512GB 0x8000000000ULL
+#define PAGE_SIZE_256TB 0xE80000000000ULL
 
 EFI_HANDLE ImageBase;
 
@@ -65,63 +72,121 @@ void FPUInit(void){
 }
 #pragma clang optimize on
 
-u64* BuildDynamicPageTable(u64 MaxPhysMem, EFI_BOOT_SERVICES* bs)
-{
-    const u64 GB = 1024ULL * 1024 * 1024;
-    u64 bytes_per_pdpt = 512ULL * GB;
-    u64 pdpt_count = (MaxPhysMem + bytes_per_pdpt - 1) / bytes_per_pdpt;
-    if (pdpt_count == 0) pdpt_count = 1;
-    if (pdpt_count > 512) pdpt_count = 512;
+_Bool IsLa57Supported() {
+    unsigned int eax, ebx, ecx, edx;
+    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+    return (ecx & (1 << 16)) != 0;
+}
 
-    u64 total_pages_needed = 1 + pdpt_count;
+u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
+    EFI_PHYSICAL_ADDRESS alloc_addr;
+    int use_l5 = IsLa57Supported();
 
-    EFI_PHYSICAL_ADDRESS allocated_buffer = 0;
-    EFI_STATUS status = bs->AllocatePages(
-        AllocateAnyPages,
-        EfiRuntimeServicesData,
-        total_pages_needed,
-        &allocated_buffer
-    );
+    alloc_addr = 0xFFFFFFFF;
+    alloc_addr = 0xFFFFFFFF;
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) {
+        DebugStr("AllocatePages failed!\n");
+        return 0;
+    }
+    u64* root_table = (u64*)alloc_addr;
+    for (int i = 0; i < 512; i++) root_table[i] = 0;
 
-    if (EFI_ERROR(status) || allocated_buffer == 0) {
-        DebugStr("[CRITICAL] Failed to allocate page table memory!\r\n");
-        while(1);
+    u64* pml4 = NULL;
+    if (use_l5) {
+        alloc_addr = 0xFFFFFFFF;
+        if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+        pml4 = (u64*)alloc_addr;
+        for (int i = 0; i < 512; i++) pml4[i] = 0;
+        root_table[0] = ((u64)pml4 & ~0xFFFULL) | 0x003; 
+    } else {
+        pml4 = root_table; 
     }
 
-    u8* BasePtr = (u8*)allocated_buffer;
-    u64* pml4 = (u64*)BasePtr;
-    MemSet64(pml4, 0, 512);
+    alloc_addr = 0xFFFFFFFF;
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+    u64* pdpt_0 = (u64*)alloc_addr;
+    for (int i = 0; i < 512; i++) pdpt_0[i] = 0;
+    pml4[0] = ((u64)pdpt_0 & ~0xFFFULL) | 0x003; 
+
+    alloc_addr = 0xFFFFFFFF;
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+    u64* pd = (u64*)alloc_addr;
+    for (int i = 0; i < 512; i++) pd[i] = 0;
+    pdpt_0[0] = ((u64)pd & ~0xFFFULL) | 0x003; 
+
+    alloc_addr = 0xFFFFFFFF;
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+    u64* pt = (u64*)alloc_addr;
+    for (int i = 0; i < 512; i++) pt[i] = 0;
+    pd[0] = ((u64)pt & ~0xFFFULL) | 0x003; 
+
+    for (u64 i = 1; i < 512; i++) {
+        u64 phys = i * 4096;
+        if (phys >= MaxPhysMem) break;
+        pt[i] = (phys >= 0xC8000000 && phys < 0xD0000000) ? (phys | 0x013) : (phys | 0x003);
+    }
     
-    for (u64 i = 1; i < pdpt_count; i++) {
-        u64* pdpt = (u64*)(BasePtr + 4096 + i * 4096);
-        MemSet64(pdpt, 0, 512);
-        pml4[i] = ((u64)pdpt) | PAGE_PRESENT | PAGE_WRITABLE;
+    for (u64 i = 1; i < 512; i++) {
+        u64 phys = i * 2097152;
+        if (phys >= MaxPhysMem) break;
+        pd[i] = (phys >= 0xC8000000 && phys < 0xD0000000) ? (phys | 0x193) : (phys | 0x083);
     }
 
-    u64 table_start = allocated_buffer;
-    u64 table_end   = allocated_buffer + total_pages_needed * 4096;
-    u64 pt_gb_start = (table_start / GB) * GB;
+    u64 max_1gb_pages = (MaxPhysMem + 1073741824ULL - 1) / 1073741824ULL;
+    if (max_1gb_pages > 512) max_1gb_pages = 512;
 
-    for (u64 phys = pt_gb_start; phys < table_end; phys += GB) {
-        u32 pml4_idx = (phys >> 39) & 0x1FF;
-        u32 pdpt_idx = (phys >> 30) & 0x1FF;
-        if (pml4_idx >= pdpt_count) continue;
-        u64* pdpt = (u64*)(pml4[pml4_idx] & 0xFFFFFFFFFFFFF000ULL);
-        pdpt[pdpt_idx] = phys | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
+    for (u64 i = 0; i <= max_1gb_pages; i++) {
+        u64 phys = i * 1073741824ULL;
+        if (i == 0) continue;
+
+        u64 pml5_idx = phys / (1ULL << 48);
+        u64 pml4_idx = (phys % (1ULL << 48)) / (1ULL << 39);
+        u64 pdpt_idx = (phys % (1ULL << 39)) / 1073741824ULL;
+
+        if (phys >= 0x0DF0000000ULL && phys <= 0x0E10000000ULL) {
+            DebugStr("phys=");
+            DebugU64(phys);
+            DebugStr(" pml4_idx=");
+            DebugU64(pml4_idx);
+            DebugStr(" pdpt_idx=");
+            DebugU64(pdpt_idx);
+            DebugChar('\n');
+        }
+
+        if (!use_l5 && phys >= (1ULL << 48)) break;
+        if (pml5_idx >= 512) break;
+
+        u64* active_pml4 = pml4;
+        if (use_l5) {
+            if (root_table[pml5_idx] == 0) {
+                alloc_addr = 0xFFFFFFFF;
+                if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+                u64* new_pml4 = (u64*)alloc_addr;
+                for (int k = 0; k < 512; k++) new_pml4[k] = 0;
+                root_table[pml5_idx] = ((u64)new_pml4 & ~0xFFFULL) | 0x003;
+            }
+            active_pml4 = (u64*)(root_table[pml5_idx] & ~0xFFFULL);
+        }
+
+        if (active_pml4[pml4_idx] == 0) {
+            alloc_addr = 0xFFFFFFFF;
+            if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+            u64* new_pdpt = (u64*)alloc_addr;
+            for (int k = 0; k < 512; k++) new_pdpt[k] = 0;
+            active_pml4[pml4_idx] = ((u64)new_pdpt & ~0xFFFULL) | 0x003;
+        }
+        u64* cur_pdpt = (u64*)(active_pml4[pml4_idx] & ~0xFFFULL);
+
+        if (pml5_idx == 0 && pml4_idx == 0 && pdpt_idx == 0) continue;
+
+        if (phys > PhysMem || phys > MaxPhysMem) {
+            cur_pdpt[pdpt_idx] = phys | 0x193; 
+        } else {
+            cur_pdpt[pdpt_idx] = phys | 0x083; 
+        }
     }
 
-    u64 mapping_limit = pdpt_count * bytes_per_pdpt;
-    u64 effective_max = (MaxPhysMem < mapping_limit) ? MaxPhysMem : mapping_limit;
-
-    for (u64 phys = 1; phys < effective_max; phys += GB) {
-        u32 pml4_idx = (phys >> 39) & 0x1FF;
-        u32 pdpt_idx = (phys >> 30) & 0x1FF;
-        if (pml4_idx >= pdpt_count) break;
-        u64* pdpt = (u64*)(pml4[pml4_idx] & 0xFFFFFFFFFFFFF000ULL);
-        pdpt[pdpt_idx] = phys | PAGE_PRESENT | PAGE_WRITABLE | PAGE_HUGE;
-    }
-
-    return pml4;
+    return root_table;
 }
 
 EFI_STATUS ExitBootServices_Safe(EFI_HANDLE ImageHandle) {
@@ -161,31 +226,90 @@ u64 GetXhciMmioBase() {
     return 0;
 }
 
-void kernel_main() {
-    DebugStr("Jumped To KernelMain.\n");
-    GopMode.FrameBufferSize = (size_t)GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(u32);
-    XhciController* Xhci = XhciInit(GetXhciMmioBase());
-    if (Xhci) XhciScanPorts(Xhci);
-    DebugStr("XhciScanPorts Finsh.\n");
-    ATAInit();
-    if (GPTDetect(0, 0)) Fat32Init(0, 0);
-    if (GPTDetect(0, 1)) Fat32Init(0, 1);
-    if (GPTDetect(1, 0)) Fat32Init(1, 0);
-    if (GPTDetect(1, 1)) Fat32Init(1, 1);
-    while(1){
-        TaskPoll();
-        GOPClearAlpha(0x80000000);
-        GOPClearAlpha(0x80FF0000);
-        GOPFlash();
-    }
-}
-
 void InitPool(u64 PoolSize){
     AllocBlock *block = (AllocBlock*)POOL_PHYS_START;
     block->size=PoolSize - sizeof(AllocBlock);
     block->is_free=1;
     block->next = NULL;
     KernelPool.Head = block;
+}
+
+void InitBlock(u64 PoolSize,u64 Pos){
+    AllocBlock *block = (AllocBlock*)Pos;
+    block->size=PoolSize - sizeof(AllocBlock);
+    block->is_free=1;
+    block->next = NULL;
+    PoolAddBlock(&KernelPool,block);
+}
+
+void LoadDynamicPageTable(u64* root_table) {
+    u64 pure_cr3 = ((u64)root_table) & ~0xFFFULL;
+
+    if (!IsLa57Supported()) {
+        asm volatile(
+            "movq %0, %%cr3\n\t" 
+            "movq %%cr3, %%rax\n\t"
+            "jmp 1f\n\t"
+            "1:\n\t"
+            :: "r"(pure_cr3) : "memory"
+        );
+        return;
+    }
+
+    static u64 temporary_gdt[] = {
+        0x0000000000000000,
+        0x00209a0000000000, 
+        0x00cf9a000000ffff, 
+        0x00cf92000000ffff  
+    };
+
+    struct {
+        u16 limit;
+        u64 base;
+    } __attribute__((packed)) gdtr = {
+        .limit = sizeof(temporary_gdt) - 1,
+        .base = (u64)temporary_gdt
+    };
+
+    asm volatile(
+        "movq %0, %%rbx\n\t"
+        "lgdt %1\n\t"
+        "leaq 1f(%%rip), %%rax\n\t"
+        "pushq $0x10\n\t"
+        "pushq %%rax\n\t"
+        "lretq\n\t"
+        
+        ".code32\n\t"
+        "1:\n\t"
+        "movl $0x18, %%eax\n\t"
+        "movl %%eax, %%ds\n\t"
+        "movl %%eax, %%ss\n\t"
+        
+        "movl %%cr0, %%eax\n\t"
+        "btrl $31, %%eax\n\t"
+        "movl %%eax, %%cr0\n\t"
+        
+        "movl %%cr4, %%eax\n\t"
+        "btsl $12, %%eax\n\t"
+        "movl %%eax, %%cr4\n\t"
+        
+        "movl %%ebx, %%cr3\n\t"
+        
+        "movl %%cr0, %%eax\n\t"
+        "btsl $31, %%eax\n\t"
+        "movl %%eax, %%cr0\n\t"
+        
+        "pushl $0x08\n\t"
+        "pushl $2f\n\t"
+        "lretl\n\t"
+        
+        ".code64\n\t"
+        "2:\n\t"
+        "nop\n\t"
+        :
+        : "r"(pure_cr3), "m"(gdtr)
+        : "rax", "rbx", "memory"
+    );
 }
 
 EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
@@ -219,7 +343,11 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     Gop->SetMode(Gop,0);
     MemCopy(&GopMode,Gop->Mode,sizeof(EFI_GOP_MODE));
     MemCopy(&GopInfo,Gop->Mode->Info,sizeof(EFI_GOP_MODE_INFO));
-    GopOut=(u32*)(u64)GopMode.FrameBufferBase;
+    GopMode.FrameBufferSize=GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
+    GopOut=(HDR_PIXEL*)(u64)GopMode.FrameBufferBase;
+    DebugStr("\nGop->Mode->Info->PixelFormat = ");
+    DebugU32(Gop->Mode->Info->PixelFormat);
+    DebugChar('\n');
 
     UINTN MemoryMapSize = 0;
     EFI_MEMORY_DESCRIPTOR *MemMap = NULL;
@@ -232,32 +360,78 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
 
     UINTN EntryCount = MemoryMapSize / DescriptorSize;
     u64 MaxPhysicalAddress = 0;
+    u64 MaxAvailableAddress = 0;
+
     for (UINTN i = 0; i < EntryCount; i++) {
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR*)((u8*)MemMap + (i * DescriptorSize));
         u64 EndAddress = desc->PhysicalStart + (desc->NumberOfPages * 4096);
-        if (EndAddress > MaxPhysicalAddress) MaxPhysicalAddress = EndAddress;
+        
+        if (EndAddress > MaxPhysicalAddress) {
+            MaxPhysicalAddress = EndAddress;
+        }
+        
+        if (desc->Type == EfiConventionalMemory || 
+            desc->Type == EfiBootServicesData ||
+            desc->Type == EfiRuntimeServicesData) {
+            if (EndAddress > MaxAvailableAddress) {
+                MaxAvailableAddress = EndAddress;
+            }
+        }
     }
-    DebugStr("MaxPhysicalAddress: ");DebugU64(MaxPhysicalAddress);DebugChar('\n');
-    
-    u64 *pml4=BuildDynamicPageTable(MaxPhysicalAddress+10, bs);
+    u64 RealMaxAddress = 0;
+    u64 MaxMMIO = 0;
 
+    for (UINTN i = 0; i < EntryCount; i++) {
+        EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR*)((u8*)MemMap + (i * DescriptorSize));
+        u64 EndAddress = desc->PhysicalStart + (desc->NumberOfPages * 4096);
+
+        if (EndAddress > RealMaxAddress) {
+            RealMaxAddress = EndAddress;
+        }
+        
+        if (desc->Type == 11) {
+            if (EndAddress > MaxMMIO) {
+                MaxMMIO = EndAddress;
+            }
+        }
+    }
+
+    u64 MaxAddress = RealMaxAddress;
+    if (MaxMMIO > MaxAddress) {
+        MaxAddress = MaxMMIO;
+    }
+    if (MaxAddress < 0x0EFFFFFFFFULL) {
+        MaxAddress = 0x0EFFFFFFFFULL;
+        DebugChar('\n');
+    }
+
+    DebugStr("\nMaxPhysicalAddress: ");DebugU64(MaxAddress);DebugChar('\n');
+    DebugStr("BuildDynamicPageTable.\n");
+    u64 *pml5 = BuildDynamicPageTable(MaxAddress, MaxAvailableAddress, bs);
+    if (!pml5) {
+        DebugStr("BuildDynamicPageTable failed!\n");
+        while(1) asm volatile("cli\n\t hlt");
+    }
+    DebugStr("ExitBootServices.\n");
+    DebugStr("ExitBootServices.\n");
     ExitBootServices_Safe(image);
     asm volatile("cli\n\t");
-
+    DebugStr("MemFlash.\n");
     MemFullFlash();
-    asm volatile("mov %0, %%cr3" :: "r"(pml4) : "memory");
-
+    DebugStr("Mov pml4 to cr3.\n");
+    LoadDynamicPageTable(pml5);
+    DebugStr("InitPool.\n");
     u64 PoolSize = 0x40000000;
     if (POOL_PHYS_START + PoolSize > MaxPhysicalAddress) {
         PoolSize = MaxPhysicalAddress - POOL_PHYS_START;
     }
     InitPool(PoolSize);
-
+    DebugStr("AllocStack.\n");
     u8* KernelStack = AlignedAlloc(&KernelPool, 64*1024*1024,4096);
-    GopBack = (u32*)(u64)AlignedAlloc(&KernelPool, GopMode.FrameBufferSize, 64);
+    GopBack = (HDR_PIXEL*)(u64)AlignedAlloc(&KernelPool, GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL), 64);
 
     LoadGDT();
-    InitInterruptSystem();
+    InitIDT();
 
     void (*entry_point)(void) = kernel_main;
 
@@ -272,4 +446,76 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         : "memory"
     );
     return 0;
+}
+
+void kernel_main() {
+    DebugStr("Jumped To KernelMain.\n");
+    GopMode.FrameBufferSize=GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
+    DebugStr("GopBack = ");
+    DebugU64((u64)GopBack);
+    DebugChar('\n');
+    DebugStr("GopOut = ");
+    DebugU64((u64)GopOut);
+    DebugChar('\n');
+    DebugStr("PixelsPerScanLine = ");
+    DebugU32(GopInfo.PixelsPerScanLine);
+    DebugChar('\n');
+    DebugStr("VerticalResolution = ");
+    DebugU32(GopInfo.VerticalResolution);
+    DebugChar('\n');
+    DebugStr("pixelCount = ");
+    DebugU32(GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution);
+    DebugChar('\n');
+    DebugStr("PixelFormat = ");
+    DebugU32(GopInfo.PixelFormat);
+    DebugChar('\n');
+    
+    XhciController* Xhci = XhciInit(GetXhciMmioBase());
+    if (Xhci) {
+        XhciScanPorts(Xhci);
+        DebugStr("XhciScanPorts Finished.\n");
+    }
+    
+    ATAInit();
+    DebugStr("ATA Init Done.\n");
+    
+    u32 esp_count = GPTGetESPCount();
+    DebugStr("ESP count: ");
+    DebugU32(esp_count);
+    DebugChar('\n');
+
+    for (u32 i = 0; i < esp_count; i++) {
+        ESPEntry* esp = GPTGetESP(i);
+        if (esp) {
+            DebugStr("ESP ");
+            DebugU32(i);
+            DebugStr(": LBA=");
+            DebugU64(esp->StartLba);
+            DebugStr(" Channel=");
+            DebugU8(esp->Channel);
+            DebugStr(" Drive=");
+            DebugU8(esp->Drive);
+            DebugChar('\n');
+        }
+    }
+    
+    DebugStr("If in QEMU,All int 0xD Bug is QEMU Bug,Not Kernel:\nInit GTX960.\n");
+    NvidiaGPU GPU={0};
+    if (PCIFindNvidiaGPU(&GPU)) {
+        if (NvidiaGPUInit(&GPU)) {
+            DebugStr("GTX960 Init Success.\n");
+        } else {
+            DebugStr("GTX960 Init Failed.\n");
+        }
+    } else {
+        DebugStr("GTX960 Not Found.\n");
+    }
+    DebugStr("Init GTX960 Finish. End\n");
+
+    while (1) {
+        TaskPoll();
+        GOPClearAlpha(HDR_Pack(0x0000, 0x0000, 0x0000, 0x8000));
+        GOPClearAlpha(HDR_Pack(0xFFFF, 0x0000, 0x0000, 0x8000));
+        GOPFlash();
+    }
 }

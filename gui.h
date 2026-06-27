@@ -7,12 +7,12 @@ typedef struct Obj{
     _Bool Visible;
     void (*Draw)(void* self);
 } Obj;
-
+typedef struct Window Window;
 typedef struct Window{
     Obj Base;
     char* Title;
     _Bool Hide;
-    void (*Poll)(void);
+    void (*Poll)(Window* self);
     u64 Count;
     Obj *Objs[];
 } Window;

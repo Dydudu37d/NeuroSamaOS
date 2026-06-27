@@ -1,6 +1,6 @@
 #include "kmalloc.h"
 
-static void MergeFreeBlocks(AllocPool* Pool, AllocBlock* block) {
+void MergeFreeBlocks(AllocPool* Pool, AllocBlock* block) {
     if (!block || !block->is_free) return;
     
     AllocBlock* next = block->next;
@@ -29,7 +29,7 @@ void PoolAddBlock(AllocPool* Pool, AllocBlock* Block) {
 }
 
 static void* DoSplit(AllocBlock* curr, void* aligned_ptr, size_t size) {
-    if (!curr || !aligned_ptr || !size) return NULL;
+    if (!curr || !aligned_ptr || size == 0) return NULL;
     
     size_t used_offset = (u8*)aligned_ptr - (u8*)curr;
     size_t remaining_size = curr->size - used_offset - size;
@@ -58,7 +58,7 @@ void* Alloc(AllocPool* Pool, size_t size) {
     AllocBlock* curr = Pool->Head;
     while (curr) {
         if (curr->is_free && curr->size >= size) {
-            void* result = (void*)((u8*)curr+sizeof(AllocBlock));
+            void* result = (void*)((u8*)curr + sizeof(AllocBlock));
             return DoSplit(curr, result, size);
         }
         curr = curr->next;
@@ -75,11 +75,10 @@ void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align) {
     while (curr) {
         if (curr->is_free && curr->size >= size) {
             u64 block_start = (u64)curr + sizeof(AllocBlock);
-            
-            u64 aligned_ptr = (block_start + 8 + align - 1) & ~(align - 1);
+            u64 aligned_ptr = (block_start + align - 1) & ~(align - 1);
             size_t padding = aligned_ptr - block_start;
 
-            if (curr->size >= size + padding) {
+            if (curr->size >= size + padding + sizeof(AllocBlock*)) {
                 void* res = DoSplit(curr, (void*)aligned_ptr, size);
                 if (res) {
                     *(AllocBlock**)((u8*)res - 8) = curr;
@@ -95,7 +94,15 @@ void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align) {
 void Free(AllocPool* Pool, void* ptr) {
     if (!ptr || !Pool) return;
     
-    AllocBlock* block = *(AllocBlock**)((u8*)ptr - 8); 
+    AllocBlock* block = (AllocBlock*)((u8*)ptr - sizeof(AllocBlock));
+    
+    u64 meta_addr = (u64)((u8*)ptr - 8);
+    u64 block_end = (u64)block + sizeof(AllocBlock);
+    
+    if (meta_addr >= block_end && meta_addr < block_end + 64) {
+        AllocBlock** meta_block = (AllocBlock**)((u8*)ptr - 8);
+        block = *meta_block;
+    }
     
     if (block->is_free) return;
     block->is_free = 1;

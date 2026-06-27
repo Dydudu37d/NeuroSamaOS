@@ -1,13 +1,21 @@
-#include "Fat32.h"
+#include "fat32.h"
 #include "ata.h"
 #include "gpt.h"
+#include "str.h"
 
 static u64 ClusterToLba(Fat32Context* Context, u32 Cluster) {
-    if (Cluster < 2) Cluster = Context->RootCluster;
+    if (Cluster < 2) {
+        Cluster = Context->RootCluster;
+        if (Cluster < 2) return 0;
+    }
     return Context->FirstDataLba + (u64)(Cluster - 2) * Context->SectorsPerCluster;
 }
 
 static u32 GetNextCluster(Fat32Context* Context, u32 CurrentCluster) {
+    if (CurrentCluster < 2 || CurrentCluster >= 0x0FFFFFF8) {
+        return 0x0FFFFFFF;
+    }
+    
     u32 FatOffset = CurrentCluster * 4;
     u32 SectorOffset = FatOffset / 512;
     u32 EntryOffset = FatOffset % 512;
@@ -38,7 +46,12 @@ _Bool Fat32Init(Fat32Context* Context, u8 Channel, u8 Drive) {
     }
 
     Fat32Dbr* Dbr = (Fat32Dbr*)SectorBuffer;
-    if (Dbr->BytesPerSector != 512 || Dbr->NumFats == 0) {
+    if (Dbr->BytesPerSector != 512 || Dbr->NumFats == 0 || Dbr->FatSize32 == 0 || Dbr->SectorsPerCluster == 0) {
+        return 0;
+    }
+
+    u16* Sig = (u16*)&SectorBuffer[510];
+    if (*Sig != 0xAA55) {
         return 0;
     }
 
@@ -75,13 +88,23 @@ static void FormatTo83(const char* Src, char* Dest) {
     }
 }
 
-static _Bool MemCmp(const void* S1, const void* S2, u32 N) {
-    const u8* P1 = S1;
-    const u8* P2 = S2;
-    for (u32 I = 0; I < N; I++) {
-        if (P1[I] != P2[I]) return 0;
+static void WriteFatEntry(Fat32Context* Context, u32 Cluster, u32 Value) {
+    u32 FatOffset = Cluster * 4;
+    u32 SectorOffset = FatOffset / 512;
+    u32 EntryOffset = FatOffset % 512;
+    u8 FatSector[512];
+    u64 FatLba = Context->FirstFatLba + SectorOffset;
+
+    if (!ATAReadSector(Context->Channel, Context->Drive, FatLba, FatSector)) return;
+    *(u32*)&FatSector[EntryOffset] = Value;
+    ATAWriteSector(Context->Channel, Context->Drive, FatLba, FatSector);
+
+    for (u8 I = 1; I < 2; I++) {
+        u64 BackupFatLba = Context->FirstFatLba + ((u64)I * Context->FatSize) + SectorOffset;
+        ATAReadSector(Context->Channel, Context->Drive, BackupFatLba, FatSector);
+        *(u32*)&FatSector[EntryOffset] = Value;
+        ATAWriteSector(Context->Channel, Context->Drive, BackupFatLba, FatSector);
     }
-    return 1;
 }
 
 _Bool Fat32ReadFile(Fat32Context* Context, const char* Path, u8* Buffer, u32* OutFileSize) {
@@ -103,9 +126,11 @@ _Bool Fat32ReadFile(Fat32Context* Context, const char* Path, u8* Buffer, u32* Ou
 
         _Bool Found = 0;
         Fat32DirEntry FoundEntry;
+        u32 SearchCluster = CurrentCluster;
 
-        while (CurrentCluster < 0x0FFFFFF8) {
-            u64 StartLba = ClusterToLba(Context, CurrentCluster);
+        while (SearchCluster < 0x0FFFFFF8) {
+            u64 StartLba = ClusterToLba(Context, SearchCluster);
+            if (StartLba == 0) return 0;
 
             for (u32 S = 0; S < Context->SectorsPerCluster; S++) {
                 if (!ATAReadSector(Context->Channel, Context->Drive, StartLba + S, DirSector)) {
@@ -131,7 +156,7 @@ _Bool Fat32ReadFile(Fat32Context* Context, const char* Path, u8* Buffer, u32* Ou
                     }
                 }
             }
-            CurrentCluster = GetNextCluster(Context, CurrentCluster);
+            SearchCluster = GetNextCluster(Context, SearchCluster);
         }
 
     SearchDone:
@@ -152,6 +177,7 @@ _Bool Fat32ReadFile(Fat32Context* Context, const char* Path, u8* Buffer, u32* Ou
 
             while (BytesRemaining > 0 && CurrentCluster < 0x0FFFFFF8) {
                 u64 FileLba = ClusterToLba(Context, CurrentCluster);
+                if (FileLba == 0) return 0;
                 
                 for (u32 S = 0; S < Context->SectorsPerCluster && BytesRemaining > 0; S++) {
                     if (BytesRemaining >= 512) {
@@ -194,23 +220,10 @@ static u32 AllocateCluster(Fat32Context* Context, u32 LastCluster) {
 
         u32 Entry = *(u32*)&FatSector[EntryOffset];
         if ((Entry & 0x0FFFFFFF) == 0) {
-            *(u32*)&FatSector[EntryOffset] = 0x0FFFFFFF;
-            if (!ATAWriteSector(Context->Channel, Context->Drive, Context->FirstFatLba + CurrentSector, FatSector)) {
-                return 0x0FFFFFFF;
-            }
+            WriteFatEntry(Context, Cluster, 0x0FFFFFFF);
 
             if (LastCluster >= 2 && LastCluster < 0x0FFFFFF8) {
-                u32 LastFatOffset = LastCluster * 4;
-                u32 LastSectorOffset = LastFatOffset / 512;
-                u32 LastEntryOffset = LastFatOffset % 512;
-
-                if (!ATAReadSector(Context->Channel, Context->Drive, Context->FirstFatLba + LastSectorOffset, FatSector)) {
-                    return 0x0FFFFFFF;
-                }
-                *(u32*)&FatSector[LastEntryOffset] = Cluster;
-                if (!ATAWriteSector(Context->Channel, Context->Drive, Context->FirstFatLba + LastSectorOffset, FatSector)) {
-                    return 0x0FFFFFFF;
-                }
+                WriteFatEntry(Context, LastCluster, Cluster);
             }
             return Cluster;
         }
@@ -226,7 +239,7 @@ _Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, 
 
     u64 DirEntryLba = 0;
     u32 DirEntryOffset = 0;
-    Fat32DirEntry FoundEntry;
+    Fat32DirEntry FoundEntry = {0};
     _Bool Found = 0;
 
     while (*PathPtr != '\0') {
@@ -240,9 +253,11 @@ _Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, 
 
         FormatTo83(Component, Target83);
         Found = 0;
+        u32 SearchCluster = CurrentCluster;
 
-        while (CurrentCluster < 0x0FFFFFF8) {
-            u64 StartLba = ClusterToLba(Context, CurrentCluster);
+        while (SearchCluster < 0x0FFFFFF8) {
+            u64 StartLba = ClusterToLba(Context, SearchCluster);
+            if (StartLba == 0) return 0;
 
             for (u32 S = 0; S < Context->SectorsPerCluster; S++) {
                 if (!ATAReadSector(Context->Channel, Context->Drive, StartLba + S, DirSector)) {
@@ -270,7 +285,7 @@ _Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, 
                     }
                 }
             }
-            CurrentCluster = GetNextCluster(Context, CurrentCluster);
+            SearchCluster = GetNextCluster(Context, SearchCluster);
         }
 
     SearchDone:
@@ -291,37 +306,37 @@ _Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, 
 
     if (Append && FoundEntry.FileSize > 0) {
         WriteOffset = FoundEntry.FileSize;
-        while (1) {
-            u32 Next = GetNextCluster(Context, LastCluster);
-            if (Next >= 0x0FFFFFF8) break;
-            LastCluster = Next;
+        LastCluster = FileStartCluster;
+        
+        if (LastCluster >= 2 && LastCluster < 0x0FFFFFF8) {
+            while (1) {
+                u32 Next = GetNextCluster(Context, LastCluster);
+                if (Next >= 0x0FFFFFF8) break;
+                LastCluster = Next;
+            }
         }
     } else {
         if (FileStartCluster >= 2 && FileStartCluster < 0x0FFFFFF8) {
             u32 PrevCluster = FileStartCluster;
-            while (PrevCluster < 0x0FFFFFF8) {
+            while (PrevCluster < 0x0FFFFFF8 && PrevCluster >= 2) {
                 u32 Next = GetNextCluster(Context, PrevCluster);
-                u32 FatOffset = PrevCluster * 4;
-                u32 SectorOffset = FatOffset / 512;
-                u32 EntryOffset = FatOffset % 512;
-                if (ATAReadSector(Context->Channel, Context->Drive, Context->FirstFatLba + SectorOffset, DirSector)) {
-                    *(u32*)&DirSector[EntryOffset] = 0;
-                    ATAWriteSector(Context->Channel, Context->Drive, Context->FirstFatLba + SectorOffset, DirSector);
-                }
+                WriteFatEntry(Context, PrevCluster, 0);
                 PrevCluster = Next;
             }
         }
         FileStartCluster = 0;
         LastCluster = 0;
+        FoundEntry.FileSize = 0;
     }
 
     u32 BytesLeft = Size;
     const u8* InPtr = Buffer;
     u32 ClusterSize = Context->SectorsPerCluster * 512;
     u8 WriteSector[512];
+    u32 TotalWritten = WriteOffset;
 
     while (BytesLeft > 0) {
-        u32 ClusterOffset = WriteOffset % ClusterSize;
+        u32 ClusterOffset = TotalWritten % ClusterSize;
         u32 SectorInCluster = ClusterOffset / 512;
         u32 OffsetInSector = ClusterOffset % 512;
 
@@ -339,6 +354,8 @@ _Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, 
         }
 
         u64 TargetLba = ClusterToLba(Context, LastCluster) + SectorInCluster;
+        if (TargetLba == 0) return 0;
+        
         if (OffsetInSector != 0 || BytesLeft < 512) {
             if (!ATAReadSector(Context->Channel, Context->Drive, TargetLba, WriteSector)) return 0;
         }
@@ -354,10 +371,10 @@ _Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, 
 
         InPtr += Chunk;
         BytesLeft -= Chunk;
-        WriteOffset += Chunk;
+        TotalWritten += Chunk;
     }
 
-    FoundEntry.FileSize = WriteOffset;
+    FoundEntry.FileSize = TotalWritten;
 
     if (!ATAReadSector(Context->Channel, Context->Drive, DirEntryLba, DirSector)) return 0;
     Fat32DirEntry* TargetEntry = (Fat32DirEntry*)&DirSector[DirEntryOffset];
@@ -389,9 +406,11 @@ _Bool Fat32SetAttribute(Fat32Context* Context, const char* Path, u8 Attribute) {
 
         FormatTo83(Component, Target83);
         Found = 0;
+        u32 SearchCluster = CurrentCluster;
 
-        while (CurrentCluster < 0x0FFFFFF8) {
-            u64 StartLba = ClusterToLba(Context, CurrentCluster);
+        while (SearchCluster < 0x0FFFFFF8) {
+            u64 StartLba = ClusterToLba(Context, SearchCluster);
+            if (StartLba == 0) return 0;
 
             for (u32 S = 0; S < Context->SectorsPerCluster; S++) {
                 if (!ATAReadSector(Context->Channel, Context->Drive, StartLba + S, DirSector)) {
@@ -419,7 +438,7 @@ _Bool Fat32SetAttribute(Fat32Context* Context, const char* Path, u8 Attribute) {
                     }
                 }
             }
-            CurrentCluster = GetNextCluster(Context, CurrentCluster);
+            SearchCluster = GetNextCluster(Context, SearchCluster);
         }
 
     SearchDone:

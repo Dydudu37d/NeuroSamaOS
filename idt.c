@@ -7,24 +7,6 @@ extern RegContext MainGlobalContext;
 static struct IDTEntry idt[256];
 static struct IDTR idtr;
 
-struct TSS {
-    u32 reserved0;
-    u64 rsp0;
-    u64 rsp1;
-    u64 rsp2;
-    u64 reserved1;
-    u64 ist1;
-    u64 ist2;
-    u64 ist3;
-    u64 ist4;
-    u64 ist5;
-    u64 ist6;
-    u64 ist7;
-    u64 reserved2;
-    u16 reserved3;
-    u16 iopb_offset;
-} __attribute__((packed));
-
 volatile u64 LastErrorCode = 0;
 volatile u64 LastVector = 0;
 volatile _Bool IDTGotError = 0;
@@ -57,30 +39,111 @@ static void outb_str(const char* s) {
 
 u8 get_instruction_length(u64 rip) {
     if (rip < 0x1000) return 1;
-    u8 first_byte = *(volatile u8*)rip;
-    if (first_byte == 0x0F) {
-        u8 second_byte = *(volatile u8*)(rip + 1);
-        if (second_byte == 0x38 || second_byte == 0x3A) return 3;
-        return 2;
+
+    volatile u8* p = (volatile u8*)rip;
+    u8 len = 0;
+    
+    while (len < 15) {
+        u8 b = p[len];
+        if (b == 0x66 || b == 0x67 || b == 0xF0 || b == 0xF2 || b == 0xF3 ||
+            b == 0x2E || b == 0x3E || b == 0x26 || b == 0x64 || b == 0x65 || b == 0x36) {
+            len++;
+        } else {
+            break;
+        }
     }
-    if ((first_byte & 0xF0) == 0x40) return 2;
-    switch(first_byte) {
-        case 0x50: case 0x51: case 0x52: case 0x53:
-        case 0x54: case 0x55: case 0x56: case 0x57:
-        case 0x58: case 0x59: case 0x5A: case 0x5B:
-        case 0x5C: case 0x5D: case 0x5E: case 0x5F:
-        case 0x90: case 0xC3: case 0xCC: case 0xF4:
-            return 1;
-        case 0xCD: case 0xEB:
-            return 2;
-        case 0xE8: case 0xE9:
-            return 5;
-        case 0x74: case 0x75: case 0x7C: case 0x7D:
-        case 0x7E: case 0x7F:
-            return 2;
-        default:
-            return 3;
+
+    if ((p[len] & 0xF0) == 0x40) {
+        len++;
     }
+    if (p[len] == 0xC5) {
+        len += 2;
+        u8 modrm = p[len];
+        len++;
+        goto decode_modrm;
+    }
+
+    if (p[len] == 0xC4) {
+        len += 3;
+        u8 modrm = p[len];
+        len++;
+        goto decode_modrm;
+    }
+
+    u8 op = p[len++];
+    _Bool is_two_byte = 0;
+    _Bool has_modrm = 0;
+    u8 imm_size = 0;
+
+    if (op == 0x0F) {
+        is_two_byte = 1;
+        op = p[len++];
+        if (op == 0x38 || op == 0x3A) {
+            u8 op3 = p[len++];
+            has_modrm = 1;
+            if (op == 0x3A) imm_size = 1;
+        } else {
+            if ((op & 0xF0) == 0x80) { imm_size = 4; has_modrm = 0; }
+            else if (op == 0xA4 || op == 0xA5 || op == 0xAC || op == 0xAD) { has_modrm = 1; imm_size = 1; }
+            else if (op == 0xB0 || op == 0xB1 || op == 0xB3 || op == 0xB6 || op == 0xB7 || 
+                     (op >= 0xBB && op <= 0xBF) || op == 0xC7) { has_modrm = 1; }
+            else if (op == 0xA1 || op == 0xA2 || op == 0xA9) { has_modrm = 0; }
+            else { has_modrm = 1; }
+        }
+    } else {
+
+        if ((op & 0xC0) == 0x00) { if ((op & 0x07) <= 0x05) has_modrm = 1; }
+        else if ((op & 0xF8) == 0x50) { has_modrm = 0; }
+        else if ((op & 0xF8) == 0x68) { 
+            if (op == 0x68) imm_size = 4;
+            else if (op == 0x6A) imm_size = 1;
+            else if (op == 0x69) { has_modrm = 1; imm_size = 4; }
+            else if (op == 0x6B) { has_modrm = 1; imm_size = 1; }
+        }
+        else if ((op & 0xF0) == 0x70) { imm_size = 1; }
+        else if ((op & 0xFC) == 0x80) { has_modrm = 1; imm_size = ((op & 3) == 1) ? 4 : 1; }
+        else if ((op & 0xFC) == 0x88) { has_modrm = 1; }
+        else if ((op & 0xF0) == 0xB0) { imm_size = (op & 0x08) ? 4 : 1; }
+        else if ((op & 0xFC) == 0xC6) { has_modrm = 1; imm_size = (op & 1) ? 4 : 1; }
+        else if (op == 0xE8 || op == 0xE9) { imm_size = 4; }
+        else if (op == 0xEB) { imm_size = 1; }
+        else if ((op & 0xFC) == 0xD0 || (op & 0xFC) == 0xF6) { 
+            has_modrm = 1; 
+            if (op == 0xF6 || op == 0xF7) { 
+                u8 next_modrm = p[len]; 
+                u8 reg_field = (next_modrm >> 3) & 7;
+                
+                if (reg_field == 0) {
+                    imm_size = (op == 0xF6) ? 1 : 4; 
+                }
+            } 
+        }
+    }
+
+decode_modrm:
+    if (has_modrm) {
+        u8 modrm = p[len++];
+        u8 mod = (modrm >> 6) & 3;
+        u8 rm  = modrm & 7;
+
+        if (mod != 3) {
+            if (rm == 4) {
+                u8 sib = p[len++];
+                u8 base = sib & 7;
+                if (base == 5 && mod == 0) {
+                    len += 4;
+                }
+            }
+            
+            if (mod == 1) len += 1;
+            else if (mod == 2) len += 4;
+            else if (mod == 0 && rm == 5) len += 4;
+        }
+    }
+
+    len += imm_size;
+
+    return (len > 15 || len == 0) ? 1 : len;
 }
 
 void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *rflags) {
@@ -173,40 +236,38 @@ __attribute__((naked)) void exception_handler_##vector(u64 error_code) { \
     ); \
 }
 
-EXC_HANDLER_NO_ERROR(0)
-EXC_HANDLER_NO_ERROR(1)
-EXC_HANDLER_NO_ERROR(2)
-EXC_HANDLER_NO_ERROR(3)
-EXC_HANDLER_NO_ERROR(4)
-EXC_HANDLER_NO_ERROR(5)
-EXC_HANDLER_NO_ERROR(6)
-EXC_HANDLER_NO_ERROR(7)
-EXC_HANDLER_WITH_ERROR(8)
-EXC_HANDLER_NO_ERROR(9)
-EXC_HANDLER_WITH_ERROR(10)
-EXC_HANDLER_WITH_ERROR(11)
-EXC_HANDLER_WITH_ERROR(12)
-EXC_HANDLER_WITH_ERROR(13)
-EXC_HANDLER_WITH_ERROR(14)
-EXC_HANDLER_NO_ERROR(15)
-EXC_HANDLER_NO_ERROR(16)
-EXC_HANDLER_WITH_ERROR(17)
-EXC_HANDLER_NO_ERROR(18)
-EXC_HANDLER_NO_ERROR(19)
-EXC_HANDLER_NO_ERROR(20)
-EXC_HANDLER_WITH_ERROR(21)
-EXC_HANDLER_NO_ERROR(22)
-EXC_HANDLER_NO_ERROR(23)
-EXC_HANDLER_NO_ERROR(24)
-EXC_HANDLER_NO_ERROR(25)
-EXC_HANDLER_NO_ERROR(26)
-EXC_HANDLER_NO_ERROR(27)
-EXC_HANDLER_NO_ERROR(28)
-EXC_HANDLER_NO_ERROR(29)
-EXC_HANDLER_NO_ERROR(30)
-EXC_HANDLER_NO_ERROR(31)
-
-#define APIC_EOI_REG ((volatile u32*)(0xFEE00000ULL + 0xB0))
+EXC_HANDLER_NO_ERROR(0);
+EXC_HANDLER_NO_ERROR(1);
+EXC_HANDLER_NO_ERROR(2);
+EXC_HANDLER_NO_ERROR(3);
+EXC_HANDLER_NO_ERROR(4);
+EXC_HANDLER_NO_ERROR(5);
+EXC_HANDLER_NO_ERROR(6);
+EXC_HANDLER_NO_ERROR(7);
+EXC_HANDLER_WITH_ERROR(8);
+EXC_HANDLER_NO_ERROR(9);
+EXC_HANDLER_WITH_ERROR(10);
+EXC_HANDLER_WITH_ERROR(11);
+EXC_HANDLER_WITH_ERROR(12);
+EXC_HANDLER_WITH_ERROR(13);
+EXC_HANDLER_WITH_ERROR(14);
+EXC_HANDLER_NO_ERROR(15);
+EXC_HANDLER_NO_ERROR(16);
+EXC_HANDLER_WITH_ERROR(17);
+EXC_HANDLER_NO_ERROR(18);
+EXC_HANDLER_NO_ERROR(19);
+EXC_HANDLER_NO_ERROR(20);
+EXC_HANDLER_WITH_ERROR(21);
+EXC_HANDLER_NO_ERROR(22);
+EXC_HANDLER_NO_ERROR(23);
+EXC_HANDLER_NO_ERROR(24);
+EXC_HANDLER_NO_ERROR(25);
+EXC_HANDLER_NO_ERROR(26);
+EXC_HANDLER_NO_ERROR(27);
+EXC_HANDLER_NO_ERROR(28);
+EXC_HANDLER_NO_ERROR(29);
+EXC_HANDLER_NO_ERROR(30);
+EXC_HANDLER_NO_ERROR(31);
 
 __attribute__((interrupt))
 void default_hardware_interrupt_handler(struct InterruptFrame* frame) {

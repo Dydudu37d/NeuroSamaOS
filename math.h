@@ -27,8 +27,49 @@ static inline double DoublePow(double x, u64 time) {
 
 static inline double DoubleMod(double x, double y) {
     if (!y || !x) return 0.0;
-    s64 n = (s64)(x / y);
-    return x - n * y;
+    union { double d; u64 u; } vx = { .d = x }, vy = { .d = y };
+    u64 sx = vx.u & 0x8000000000000000ULL;
+    vx.u &= 0x7FFFFFFFFFFFFFFFULL;
+    vy.u &= 0x7FFFFFFFFFFFFFFFULL;
+    
+    int exp_x = (int)((vx.u >> 52) & 0x7FF);
+    int exp_y = (int)((vy.u >> 52) & 0x7FF);
+    u64 mant_x = vx.u & 0x000FFFFFFFFFFFFFULL;
+    u64 mant_y = vy.u & 0x000FFFFFFFFFFFFFULL;
+    
+    u64 less = (exp_x < exp_y) | ((exp_x == exp_y) & (mant_x < mant_y));
+    u64 less_mask = (u64)(-less);
+    
+    double q = vx.d / vy.d;
+    union { double d; u64 u; } vq = { .d = q };
+    int exp_q = (int)((vq.u >> 52) & 0x7FF) - 1023;
+    
+    u64 safe = (exp_q < 53);
+    u64 safe_mask = (u64)(-safe);
+    
+    s64 n = (s64)q;
+    u64 q_sign = vq.u & 0x8000000000000000ULL;
+    u64 not_int = (q != (double)n);
+    u64 neg_adj_mask = q_sign & (not_int ? ~0ULL : 0);
+    n -= (s64)neg_adj_mask;
+    
+    double r = vx.d - (double)n * vy.d;
+    
+    for (int i = 0; i < 3; i++) {
+        r = (r >= vy.d) ? (r - vy.d) : r;
+        r = (r < 0.0) ? (r + vy.d) : r;
+    }
+    
+    double result = less ? vx.d : r;
+    union { double d; u64 u; } vr = { .d = result };
+    vr.u |= sx;
+    return vr.d;
+}
+
+static inline double DoubleAbs(double x) {
+    union { double d; u64 u; } v = { .d = x };
+    v.u &= 0x7FFFFFFFFFFFFFFFULL;
+    return v.d;
 }
 
 static inline double DoubleSin(double x) {
@@ -93,20 +134,20 @@ static inline double DoubleCos(double x) {
 
 static inline float FloatSin(float x) {
     union { float f; u32 u; } v;
-    
     const float INV_PI = 0.31830988618379067154f;
     const u32 MAGIC = 0x3F800000;
-    
     v.f = x * INV_PI;
     u32 i = v.u;
-    
-    v.u = (i & 0x007FFFFF) | MAGIC;
+    v.u = (i & 0x807FFFFF) | MAGIC;
     float frac = v.f - 1.0f;
-    
+    if (i & 0x80000000) frac = -frac;
     float angle = frac * 3.141592653589793f;
-    
     float a = angle * angle;
     return angle * (1.0f - a * (0.16666666666666666f - a * (0.008333333333333333f - a * 0.0001984126984126984f)));
+}
+
+static inline float FloatCos(float x) {
+    return FloatSin(x + M_HALF_PI);
 }
 
 static inline double DoubleExp(double x) {

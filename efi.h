@@ -2,37 +2,22 @@
 
 #include "int.h"
 
-//=============================================================================
-//  Pixel Format Definitions
-//=============================================================================
 #define PixelRedGreenBlueReserved8BitPerColor   0
 #define PixelBlueGreenRedReserved8BitPerColor   1
 #define PixelBitMask                             2
 #define PixelBltOnly                             3
 #define PixelFormatMax                           4
 
-//=============================================================================
-//  Calling Convention
-//=============================================================================
 #define EFIAPI __attribute__((ms_abi))
 
-//=============================================================================
-//  GUID Definitions
-//=============================================================================
 #define EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID { 0x9042A9DE, 0x23DC, 0x4A38, { 0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A } }
 
-//=============================================================================
-//  Basic Types
-//=============================================================================
 typedef u64   EFI_STATUS;
 typedef u64   EFI_HANDLE;
 typedef u64   UINTN;
 typedef s64   INTN;
 typedef u64   EFI_PHYSICAL_ADDRESS;
 
-//=============================================================================
-//  EFI_STATUS Error Codes
-//=============================================================================
 #define EFI_SUCCESS                   0
 #define EFI_LOAD_ERROR                ((EFI_STATUS)(1ULL << 63) | 1)
 #define EFI_INVALID_PARAMETER         ((EFI_STATUS)(1ULL << 63) | 2)
@@ -53,9 +38,7 @@ typedef u64   EFI_PHYSICAL_ADDRESS;
 #define EFI_ABORTED                   ((EFI_STATUS)(1ULL << 63) | 17)
 #define EFI_SECURITY_VIOLATION        ((EFI_STATUS)(1ULL << 63) | 26)
 #define EFI_ERROR(status) (((INTN)(status)) < 0)
-//=============================================================================
-//  Memory Types (for AllocatePool/AllocatePages)
-//=============================================================================
+
 #define EfiReservedMemoryType       0
 #define EfiLoaderCode               1
 #define EfiLoaderData               2
@@ -65,14 +48,15 @@ typedef u64   EFI_PHYSICAL_ADDRESS;
 #define EfiRuntimeServicesData      6
 #define EfiConventionalMemory       7
 #define EfiMaxMemoryType            8
+#define EfiACPIReclaimMemory        9
+#define EfiACPIMemoryNVS            10
+#define EfiMemoryMappedIO           11
+#define EfiMemoryMappedIOPortSpace  12
+#define EfiPalCode                  13
 
 #define EFI_PAGE_SIZE 4096
 #define EFI_SIZE_TO_PAGES(x) (((x) + EFI_PAGE_SIZE - 1) / EFI_PAGE_SIZE)
 
-
-//=============================================================================
-//  Allocate Types (for AllocatePages)
-//=============================================================================
 typedef enum {
     AllocateAnyPages,
     AllocateMaxAddress,
@@ -80,9 +64,6 @@ typedef enum {
     MaxAllocateType
 } EFI_ALLOCATE_TYPE;
 
-//=============================================================================
-//  EFI Table Header
-//=============================================================================
 typedef struct {
     u64 Signature;
     u32 Revision;
@@ -91,9 +72,6 @@ typedef struct {
     u32 Reserved;
 } EFI_TABLE_HEADER;
 
-//=============================================================================
-//  EFI GUID
-//=============================================================================
 typedef struct {
     u32 Data1;
     u16 Data2;
@@ -108,9 +86,6 @@ static const EFI_GUID gGopGuid = {
     { 0x96, 0xFB, 0x7A, 0xDE, 0xD0, 0x80, 0x51, 0x6A }
 };
 
-//=============================================================================
-//  EFI Boot Services (Partial - GOP Required Only)
-//=============================================================================
 typedef struct EFI_BOOT_SERVICES {
     EFI_TABLE_HEADER Hdr;
     
@@ -161,9 +136,6 @@ typedef struct EFI_BOOT_SERVICES {
     EFI_STATUS (EFIAPI *LocateProtocol)(EFI_GUID *Protocol, void *Registration, void **Interface);
 } EFI_BOOT_SERVICES;
 
-//=============================================================================
-//  Simple Text Output Protocol (for debug output)
-//=============================================================================
 typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 
 typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
@@ -177,7 +149,6 @@ typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     EFI_STATUS (EFIAPI *SetCursorPosition)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This, u32 Column, u32 Row);
     EFI_STATUS (EFIAPI *EnableCursor)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This, u8 Enable);
     
-    // Current Mode Data
     u32 Mode;
     u32 Attribute;
     u32 CursorColumn;
@@ -185,9 +156,11 @@ typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     u8 CursorVisible;
 } EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 
-//=============================================================================
-//  EFI System Table
-//=============================================================================
+typedef struct {
+    EFI_GUID VendorGuid;
+    void *VendorTable;
+} EFI_CONFIGURATION_TABLE;
+
 typedef struct {
     EFI_TABLE_HEADER Hdr;
     u16 *FirmwareVendor;
@@ -196,18 +169,15 @@ typedef struct {
     EFI_HANDLE ConsoleInHandle;
     void *ConIn;
     EFI_HANDLE ConsoleOutHandle;
-    EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;  // Fixed: was void*
+    EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;
     EFI_HANDLE StandardErrorHandle;
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *StdErr;
     void *RuntimeServices;
     EFI_BOOT_SERVICES *BootServices;
+    UINTN NumberOfTableEntries;
+    EFI_CONFIGURATION_TABLE *ConfigurationTable;
 } EFI_SYSTEM_TABLE;
 
-//=============================================================================
-//  Graphics Output Protocol (GOP) Structures
-//=============================================================================
-
-// GOP Mode Information
 typedef struct {
     u32 RedMask;
     u32 GreenMask;
@@ -220,25 +190,23 @@ typedef struct {
     u32 HorizontalResolution;
     u32 VerticalResolution;
     u32 PixelFormat;
-    EFI_PIXEL_BITMAP PixelInformation;  // Fixed: was void*, now proper struct
+    EFI_PIXEL_BITMAP PixelInformation;
     u32 PixelsPerScanLine;
 } EFI_GOP_MODE_INFO;
 
-// GOP Mode (current state)
 typedef struct {
     u32 MaxMode;
     u32 Mode;
-    EFI_GOP_MODE_INFO *Info;  // Fixed: was void*, now proper pointer type
-    UINTN SizeOfInfo;         // Fixed: was u64, now UINTN
+    EFI_GOP_MODE_INFO *Info;
+    UINTN SizeOfInfo;
     EFI_PHYSICAL_ADDRESS FrameBufferBase;
     UINTN FrameBufferSize;
 } EFI_GOP_MODE;
 
-// GOP Protocol
 typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
     EFI_STATUS (EFIAPI *QueryMode)(struct EFI_GRAPHICS_OUTPUT_PROTOCOL *This, 
                                    u32 ModeNumber, 
-                                   UINTN *SizeOfInfo,           // Fixed: semantics clarified
+                                   UINTN *SizeOfInfo,
                                    EFI_GOP_MODE_INFO **Info);
     
     EFI_STATUS (EFIAPI *SetMode)(struct EFI_GRAPHICS_OUTPUT_PROTOCOL *This, 
@@ -255,10 +223,9 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
                              u32 Height,
                              u32 Delta);
     
-    EFI_GOP_MODE *Mode;  // Fixed: was void*, now proper pointer type
+    EFI_GOP_MODE *Mode;
 } EFI_GRAPHICS_OUTPUT_PROTOCOL;
 
-// MemoryDescriptor
 typedef struct {
     u32 Type;
     u64 PhysicalStart;
@@ -267,9 +234,6 @@ typedef struct {
     u64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
-//=============================================================================
-//  Loaded Image Protocol (Full Definition)
-//=============================================================================
 static const EFI_GUID gEfiLoadedImageProtocolGuid = {
     0x5B1B31A1,
     0x9562,
@@ -293,3 +257,13 @@ typedef struct {
     u64        ImageMemoryType;
     EFI_STATUS (EFIAPI *Unload)(EFI_HANDLE ImageHandle);
 } EFI_LOADED_IMAGE_PROTOCOL;
+
+static inline _Bool CompareGuid(EFI_GUID* a, EFI_GUID* b) {
+    if (a->Data1 != b->Data1) return 0;
+    if (a->Data2 != b->Data2) return 0;
+    if (a->Data3 != b->Data3) return 0;
+    for (int i = 0; i < 8; i++) {
+        if (a->Data4[i] != b->Data4[i]) return 0;
+    }
+    return 1;
+}

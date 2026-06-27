@@ -45,8 +45,35 @@ run: boot.efi
 		-m 4G \
 		-smp 2 \
 		-serial stdio \
+		-cpu Broadwell,phys-bits=48,la57=on \
+		-boot order=d -device qemu-xhci\
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+
+run-whpx: boot.efi
+	mkdir -p disk/EFI/BOOT/
+	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel whpx \
+		-cpu Broadwell,phys-bits=48,la57=on \
+		-boot order=d -device qemu-xhci\
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+
+run-vnc: boot.efi
+	mkdir -p disk/EFI/BOOT/
+	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
 		-vnc :1 \
-		-cpu max,+avx,+avx2,+sse,+sse2,+sse4.1,+sse4.2 \
+		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d -device qemu-xhci\
 	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
 
@@ -59,8 +86,21 @@ debug: boot.efi
 		-m 4G \
 		-smp 2 \
 		-serial stdio \
+		-cpu Broadwell,phys-bits=48,la57=on \
+		-boot order=d \
+		-s -S -no-reboot -no-shutdown
+
+debug-vnc: boot.efi
+	mkdir -p disk/EFI/BOOT/
+	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
 		-vnc :1 \
-		-cpu max,+avx,+avx2,+sse,+sse2,+sse4.1,+sse4.2 \
+		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d \
 		-s -S -no-reboot -no-shutdown
 

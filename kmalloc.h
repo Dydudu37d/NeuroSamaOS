@@ -17,3 +17,4 @@ void PoolAddBlock(AllocPool* Pool, AllocBlock* Block);
 void* Alloc(AllocPool* Pool, size_t size);
 void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align);
 void Free(AllocPool* Pool, void* ptr);
+void MergeFreeBlocks(AllocPool* Pool, AllocBlock* block);

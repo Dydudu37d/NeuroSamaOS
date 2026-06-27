@@ -26,7 +26,7 @@ void WMDelWindow(WM *WinM, const char *Title){
 void WMPoll(WM *WinM){
     for (u64 Idx=0;Idx<WinM->WindowEnd;Idx++){
         if ((!WinM->Windows[Idx]) || (!WinM->Windows[Idx]->Poll) || (!WinM->Windows[Idx]->Base.Draw)) continue;
-        WinM->Windows[Idx]->Poll();
+        WinM->Windows[Idx]->Poll(WinM->Windows[Idx]);
         WinM->Windows[Idx]->Base.Draw(WinM->Windows[Idx]);
     }
 }

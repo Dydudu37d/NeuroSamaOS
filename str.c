@@ -6,7 +6,6 @@ void PingPong(void **Ping, void **Pong){
     *Ping=Temp;
 }
 
-
 void StrAdd(char* Add,const char* S,size_t size){
     u64 start=0;
     while (Add[start]!='\0') start++;
@@ -16,6 +15,7 @@ void StrAdd(char* Add,const char* S,size_t size){
 }
 
 void MemCopySize32CountByte(u32* D, const u32* S, size_t size_bytes) {
+    if (size_bytes==0) return;
     if (size_bytes >= 2000000 && ((u64)D & 0x1F) == 0 && (size_bytes & 0x1F) == 0 && ((u64)S & 0x1F) == 0) {
         size_t loops = size_bytes / 32;
 
@@ -45,9 +45,10 @@ void MemCopySize32CountByte(u32* D, const u32* S, size_t size_bytes) {
 }
 
 void MemCopy(void* D, const void* S, size_t size) {
+    if (size==0) return;
     if (size >= 2000000 && ((u64)D & 0x1F) == 0 && ((u64)S & 0x1F) == 0) {
-        size_t loops = size / 32;
-        size_t remainder = size % 32;
+        size_t loops = size >> 5;
+        size_t remainder = size & 0x1F;
 
         __asm__ __volatile__(
             "1:\n\t"
@@ -78,6 +79,7 @@ void MemCopy(void* D, const void* S, size_t size) {
 
 
 void MemSet(void* D, const u8 S, size_t size) {
+    if (size==0) return;
     if (size >= 2000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 32;
 
@@ -105,6 +107,7 @@ void MemSet(void* D, const u8 S, size_t size) {
 }
 
 void MemSet16(void* D, const u16 S, size_t size) {
+    if (size==0) return;
     if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 16; 
 
@@ -134,6 +137,7 @@ void MemSet16(void* D, const u16 S, size_t size) {
 }
 
 void MemSet32(void* D, const u32 S, size_t size) {
+    if (size==0) return;
     if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 8; 
 
@@ -163,6 +167,7 @@ void MemSet32(void* D, const u32 S, size_t size) {
 }
 
 void MemSet64(void* D, const u64 S, size_t size) {
+    if (size==0) return;
     if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
         size_t loops = size / 4; 
 
@@ -192,6 +197,7 @@ void MemSet64(void* D, const u64 S, size_t size) {
 }
 
 void Bit64Str(u64 N,char* Buf,size_t size){
+    if (size==0) return;
     for (u64 idx=0;idx<size&&idx<65;idx++){
         Buf[idx]=(N&1ULL<<idx)?49:48;
     }
@@ -208,6 +214,15 @@ _Bool StrIs(const char* D, const char* S) {
     return *D == *S;
 }
 
+_Bool StrIsNoCase(const char* D, const char* S) {
+    if (!D || !S) return D == S;
+    while (*D && *S) {
+        if ((*D | 0x20) != (*S | 0x20)) return 0;
+        D++; S++;
+    }
+    return (*D | 0x20) == (*S | 0x20);
+}
+
 u64 StrLen(const char* S) {
     if (!S) return 0;
     u64 len = 0;
@@ -216,4 +231,22 @@ u64 StrLen(const char* S) {
         S++;
     }
     return len;
+}
+
+int StrSplit(char* Str, char Split, char** left, char** right) {
+    if (!Str || !left || !right) return -1;
+    
+    char* pos = Str;
+    while (*pos && *pos != Split) pos++;
+    
+    if (*pos == Split) {
+        *pos = '\0';
+        *left = Str;
+        *right = pos + 1;
+        return 0;
+    }
+    
+    *left = Str;
+    *right = NULL;
+    return 0;
 }

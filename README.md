@@ -17,7 +17,6 @@ Thanks to the Linux kernel open-source community and NVIDIA's official documenta
 
 *(I used a translation tool and DeepSeek for this acknowledgment, as English is not my native language and I want to ensure accuracy.))*
 
-
 ## Build
 ```bash
 make

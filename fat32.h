@@ -67,7 +67,7 @@ typedef struct {
     u64 FirstDataLba;
 } Fat32Context;
 
-_Bool Fat32Init(u8 Channel, u8 Drive);
-_Bool Fat32ReadFile(const char* Path, u8* Buffer, u32* OutFileSize);
-_Bool Fat32WriteFile(const char* Path, const u8* Buffer, u32 Size, _Bool Append);
-_Bool Fat32SetAttribute(const char* Path, u8 Attribute);
+_Bool Fat32Init(Fat32Context* Context, u8 Channel, u8 Drive);
+_Bool Fat32ReadFile(Fat32Context* Context, const char* Path, u8* Buffer, u32* OutFileSize);
+_Bool Fat32WriteFile(Fat32Context* Context, const char* Path, const u8* Buffer, u32 Size, _Bool Append);
+_Bool Fat32SetAttribute(Fat32Context* Context, const char* Path, u8 Attribute);
