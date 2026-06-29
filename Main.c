@@ -433,16 +433,14 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     LoadGDT();
     InitIDT();
 
-    void (*entry_point)(void) = kernel_main;
-
     u64 StackTop = (u64)KernelStack + 64*1024*1024;
     u64 StackBottom = (u64)KernelStack;
     asm volatile(
         "movq %0, %%rsp\n\t"
         "movq %1, %%rbp\n\t"
-        "jmp *%2\n\t"
+        "jmp kernel_main\n\t"
         :
-        : "r"(StackTop), "r"(StackBottom), "r"(entry_point)
+        : "r"(StackTop), "r"(StackBottom)
         : "memory"
     );
     return 0;

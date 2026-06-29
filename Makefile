@@ -47,7 +47,8 @@ run: boot.efi
 		-serial stdio \
 		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d -device qemu-xhci\
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device pvscsi,vendor-id=0x10de,device-id=0x1401
 
 run-whpx: boot.efi
 	mkdir -p disk/EFI/BOOT/
@@ -61,7 +62,8 @@ run-whpx: boot.efi
 		-accel whpx \
 		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d -device qemu-xhci\
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device pvscsi,vendor-id=0x10de,device-id=0x1401
 
 run-vnc: boot.efi
 	mkdir -p disk/EFI/BOOT/
@@ -75,7 +77,8 @@ run-vnc: boot.efi
 		-vnc :1 \
 		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d -device qemu-xhci\
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device pvscsi,vendor-id=0x10de,device-id=0x1401
 
 debug: boot.efi
 	mkdir -p disk/EFI/BOOT/
@@ -88,7 +91,8 @@ debug: boot.efi
 		-serial stdio \
 		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d \
-		-s -S -no-reboot -no-shutdown
+		-s -S -no-reboot -no-shutdown \
+		-device pvscsi,vendor-id=0x10de,device-id=0x1401
 
 debug-vnc: boot.efi
 	mkdir -p disk/EFI/BOOT/
@@ -102,7 +106,8 @@ debug-vnc: boot.efi
 		-vnc :1 \
 		-cpu Broadwell,phys-bits=48,la57=on \
 		-boot order=d \
-		-s -S -no-reboot -no-shutdown
+		-s -S -no-reboot -no-shutdown \
+		-device pvscsi,vendor-id=0x10de,device-id=0x1401
 
 clear:
 	rm -rf *.o boot.efi disk/ boot.dll

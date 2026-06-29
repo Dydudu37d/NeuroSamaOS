@@ -2,7 +2,6 @@
 #include "efi.h"
 #include "flash.h"
 #include "str.h"
-#include "debug.h"
 
 extern EFI_GOP_MODE_INFO GopInfo;
 extern EFI_GOP_MODE GopMode;
@@ -13,7 +12,7 @@ static inline int abs(int x) {
     return x < 0 ? -x : x;
 }
 
-static inline HDR_PIXEL HDRMix_Fixed(HDR_PIXEL dst, HDR_PIXEL src, u8 BitCount) {
+static inline HDR_PIXEL HDRMix(HDR_PIXEL dst, HDR_PIXEL src, u8 BitCount) {
     u32 sA = HDR_Unpack_A(src);
     if (sA == 0) return dst;
     if (sA == 0xFFFF) return src;
@@ -58,7 +57,7 @@ void GOPPixel(u32 x, u32 y, HDR_PIXEL hdr) {
                GopInfo.PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
         bitCount = 8;
     }
-    GopBack[offset] = HDRMix_Fixed(GopBack[offset], hdr, bitCount);
+    GopBack[offset] = HDRMix(GopBack[offset], hdr, bitCount);
 }
 
 void GOPLine(u32 x[2], u32 y[2], HDR_PIXEL hdr){
@@ -97,9 +96,6 @@ void GOPLine(u32 x[2], u32 y[2], HDR_PIXEL hdr){
 }
 
 void GOPRect(u32 x[2], u32 y[2], HDR_PIXEL hdr){
-    extern HDR_PIXEL* GopBack;
-    extern EFI_GOP_MODE_INFO GopInfo;
-    
     u32 startX = x[0], startY = y[0];
     u32 endX = x[1], endY = y[1];
     
@@ -126,6 +122,61 @@ void GOPRect(u32 x[2], u32 y[2], HDR_PIXEL hdr){
     MemFlash();
 }
 
+static inline void GOPRectFillFast(u32 startX, u32 endX, u32 startY, u32 endY, HDR_PIXEL hdr) {
+    u32 width = endX - startX;
+    
+    if (width == GopInfo.PixelsPerScanLine) {
+        u32 offset = startY * GopInfo.PixelsPerScanLine;
+        u32 count = (endY - startY) * GopInfo.PixelsPerScanLine;
+        MemSet64(GopBack + offset, hdr, count);
+        return;
+    }
+    
+    u32 rowSize = width * sizeof(HDR_PIXEL);
+    u32 stride = GopInfo.PixelsPerScanLine * sizeof(HDR_PIXEL);
+    
+    for (u32 y = startY; y < endY; y++) {
+        u32 offset = y * GopInfo.PixelsPerScanLine + startX;
+        if (rowSize >= 32 && ((u64)(GopBack + offset) & 31) == 0 && (rowSize & 31) == 0) {
+            size_t loops = rowSize / 32;
+            HDR_PIXEL* dst = GopBack + offset;
+            __asm__ __volatile__(
+                "vpbroadcastq %2, %%ymm0\n\t"
+                "1:\n\t"
+                "vmovntdq %%ymm0, (%0)\n\t"
+                "addq $32, %0\n\t"
+                "decq %1\n\t"
+                "jnz 1b\n\t"
+                "vzeroupper\n\t"
+                "sfence"
+                : "+r"(dst), "+r"(loops)
+                : "r"(hdr)
+                : "ymm0", "memory"
+            );
+        } else {
+            for (u32 x = startX; x < endX; x++) {
+                GopBack[offset + (x - startX)] = hdr;
+            }
+        }
+    }
+}
+
+static inline void GOPRectFillAlpha(u32 startX, u32 endX, u32 startY, u32 endY, HDR_PIXEL hdr, u8 bitCount) {
+    u32 sA = HDR_Unpack_A(hdr);
+    if (sA == 0) return;
+    if (sA == 0xFFFF) {
+        GOPRectFillFast(startX, endX, startY, endY, hdr);
+        return;
+    }
+    
+    for (u32 y = startY; y < endY; y++) {
+        for (u32 x = startX; x < endX; x++) {
+            u32 offset = y * GopInfo.PixelsPerScanLine + x;
+            GopBack[offset] = HDRMix(GopBack[offset], hdr, bitCount);
+        }
+    }
+}
+
 void GOPRectFill(u32 x[2], u32 y[2], HDR_PIXEL hdr){
     u32 startX = x[0], startY = y[0];
     u32 endX = x[1], endY = y[1];
@@ -135,27 +186,19 @@ void GOPRectFill(u32 x[2], u32 y[2], HDR_PIXEL hdr){
     if (endY > GopInfo.VerticalResolution) endY = GopInfo.VerticalResolution;
     if (startX >= endX || startY >= endY) return;
     
-    if (((hdr >> HDR_A_SHIFT) & 0xFFFF) == 0xFFFF) {
-        for (u32 y = startY; y < endY; y++) {
-            u32 offset = y * GopInfo.PixelsPerScanLine + startX;
-            for (u32 x = startX; x < endX; x++) {
-                GopBack[offset + (x - startX)] = hdr;
-            }
-        }
+    u8 bitCount = 16;
+    if (GopInfo.PixelFormat == PixelBitMask) {
+        bitCount = GetBitCountFromMask(GopInfo.PixelInformation.RedMask);
+    } else if (GopInfo.PixelFormat == PixelRedGreenBlueReserved8BitPerColor ||
+               GopInfo.PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
+        bitCount = 8;
+    }
+    
+    u32 sA = HDR_Unpack_A(hdr);
+    if (sA == 0xFFFF) {
+        GOPRectFillFast(startX, endX, startY, endY, hdr);
     } else {
-        u8 bitCount = 16;
-        if (GopInfo.PixelFormat == PixelBitMask) {
-            bitCount = GetBitCountFromMask(GopInfo.PixelInformation.RedMask);
-        } else if (GopInfo.PixelFormat == PixelRedGreenBlueReserved8BitPerColor ||
-                   GopInfo.PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
-            bitCount = 8;
-        }
-        for (u32 y = startY; y < endY; y++) {
-            for (u32 x = startX; x < endX; x++) {
-                u32 offset = y * GopInfo.PixelsPerScanLine + x;
-                GopBack[offset] = HDRMix_Fixed(GopBack[offset], hdr, bitCount);
-            }
-        }
+        GOPRectFillAlpha(startX, endX, startY, endY, hdr, bitCount);
     }
 }
 
@@ -175,19 +218,36 @@ void GOPClearAlpha(HDR_PIXEL hdr) {
         bitCount = 8;
     }
 
-    for (u32 i = 0; i < totalPixels; i++) {
-        GopBack[i] = HDRMix_Fixed(GopBack[i], hdr, bitCount);
+    u32 sA = HDR_Unpack_A(hdr);
+    if (sA == 0) return;
+    
+    if (sA == 0xFFFF) {
+        MemSet64(GopBack, hdr, totalPixels);
+        return;
     }
+    
+    for (u32 i = 0; i < totalPixels; i++) {
+        GopBack[i] = HDRMix(GopBack[i], hdr, bitCount);
+    }
+}
+
+static inline u32 GOPackPixel(HDR_PIXEL p, u32 rShift, u32 gShift, u32 bShift, u32 aShift, u32 rBits, u32 gBits, u32 bBits, u32 aBits) {
+    u32 r = (p >> HDR_R_SHIFT) & 0xFFFF;
+    u32 g = (p >> HDR_G_SHIFT) & 0xFFFF;
+    u32 b = (p >> HDR_B_SHIFT) & 0xFFFF;
+    u32 a = (p >> HDR_A_SHIFT) & 0xFFFF;
+    
+    r = (r * ((1 << rBits) - 1) + 32767) / 65535;
+    g = (g * ((1 << gBits) - 1) + 32767) / 65535;
+    b = (b * ((1 << bBits) - 1) + 32767) / 65535;
+    a = (a * ((1 << aBits) - 1) + 32767) / 65535;
+    
+    return (r << rShift) | (g << gShift) | (b << bShift) | (a << aShift);
 }
 
 void GOPFlash() {
     u32 pixelCount = GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution;
     u32* fb = (u32*)GopOut;
-
-    if (GopInfo.PixelFormat == PixelBitMask && GopInfo.PixelInformation.RedMask == 0xFFFF000000000000ULL) {
-        MemCopy(GopOut, GopBack, pixelCount * sizeof(HDR_PIXEL));
-        return;
-    }
 
     if (GopInfo.PixelFormat == PixelBitMask) {
         u32 rMask = GopInfo.PixelInformation.RedMask;
@@ -195,44 +255,50 @@ void GOPFlash() {
         u32 bMask = GopInfo.PixelInformation.BlueMask;
         u32 aMask = GopInfo.PixelInformation.ReservedMask;
         
+        if (rMask == 0xFFFF000000000000ULL && gMask == 0x0000FFFF00000000ULL && 
+            bMask == 0x00000000FFFF0000ULL && aMask == 0x000000000000FFFFULL) {
+            MemCopy(GopOut, GopBack, pixelCount * sizeof(HDR_PIXEL));
+            return;
+        }
+        
         u32 rShift = __builtin_ctz(rMask);
         u32 gShift = __builtin_ctz(gMask);
         u32 bShift = __builtin_ctz(bMask);
         u32 aShift = __builtin_ctz(aMask);
-        
         u32 rBits = __builtin_popcount(rMask);
         u32 gBits = __builtin_popcount(gMask);
         u32 bBits = __builtin_popcount(bMask);
         u32 aBits = __builtin_popcount(aMask);
         
+        if (rBits == 16 && gBits == 16 && bBits == 16 && aBits == 16 && 
+            rShift == 48 && gShift == 32 && bShift == 16 && aShift == 0) {
+            MemCopy(GopOut, GopBack, pixelCount * sizeof(HDR_PIXEL));
+            return;
+        }
+        
         for (u32 i = 0; i < pixelCount; i++) {
-            HDR_PIXEL p = GopBack[i];
-            u32 r = (p >> HDR_R_SHIFT) & 0xFFFF;
-            u32 g = (p >> HDR_G_SHIFT) & 0xFFFF;
-            u32 b = (p >> HDR_B_SHIFT) & 0xFFFF;
-            u32 a = (p >> HDR_A_SHIFT) & 0xFFFF;
-            
-            r = (r * ((1 << rBits) - 1) + 32767) / 65535;
-            g = (g * ((1 << gBits) - 1) + 32767) / 65535;
-            b = (b * ((1 << bBits) - 1) + 32767) / 65535;
-            a = (a * ((1 << aBits) - 1) + 32767) / 65535;
-            
-            fb[i] = (r << rShift) | (g << gShift) | (b << bShift) | (a << aShift);
+            fb[i] = GOPackPixel(GopBack[i], rShift, gShift, bShift, aShift, rBits, gBits, bBits, aBits);
         }
         return;
     }
 
-    for (u32 i = 0; i < pixelCount; i++) {
-        HDR_PIXEL p = GopBack[i];
-        u32 r = ((p >> HDR_R_SHIFT) & 0xFFFF) >> 6; 
-        u32 g = ((p >> HDR_G_SHIFT) & 0xFFFF) >> 6; 
-        u32 b = ((p >> HDR_B_SHIFT) & 0xFFFF) >> 6; 
-        u32 a = ((p >> HDR_A_SHIFT) & 0xFFFF) >> 14;
-
-        if (GopInfo.PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
-            fb[i] = (a << 30) | (b << 20) | (g << 10) | r;
-        } else if (GopInfo.PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
-            fb[i] = (a << 30) | (r << 20) | (g << 10) | b;
+    if (GopInfo.PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
+        for (u32 i = 0; i < pixelCount; i++) {
+            HDR_PIXEL p = GopBack[i];
+            u32 r = ((p >> HDR_R_SHIFT) & 0xFFFF) >> 8;
+            u32 g = ((p >> HDR_G_SHIFT) & 0xFFFF) >> 8;
+            u32 b = ((p >> HDR_B_SHIFT) & 0xFFFF) >> 8;
+            u32 a = ((p >> HDR_A_SHIFT) & 0xFFFF) >> 8;
+            fb[i] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+    } else if (GopInfo.PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
+        for (u32 i = 0; i < pixelCount; i++) {
+            HDR_PIXEL p = GopBack[i];
+            u32 r = ((p >> HDR_R_SHIFT) & 0xFFFF) >> 8;
+            u32 g = ((p >> HDR_G_SHIFT) & 0xFFFF) >> 8;
+            u32 b = ((p >> HDR_B_SHIFT) & 0xFFFF) >> 8;
+            u32 a = ((p >> HDR_A_SHIFT) & 0xFFFF) >> 8;
+            fb[i] = (a << 24) | (r << 16) | (g << 8) | b;
         }
     }
 }
