@@ -32,7 +32,7 @@ void LoadGDT() {
     gdtr.limit = sizeof(gdt) - 1;
     gdtr.base = (u64)gdt;
     
-    asm volatile(
+    __asm__ volatile(
         "lgdt %0\n"
         "pushq $0x08\n"
         "leaq 1f(%%rip), %%rax\n"

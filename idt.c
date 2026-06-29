@@ -149,15 +149,15 @@ decode_modrm:
 void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *rflags) {
     if (InExceptionHandler) {
         outb_str("\nRECURSIVE EXCEPTION HALT\n");
-        while(1) { asm volatile("cli; hlt"); }
+        while(1) { __asm__ volatile("cli; hlt"); }
     }
     InExceptionHandler = 1;
     
     LastVector = vector;
     LastErrorCode = error_code;
     IDTGotError = 1;
-    asm volatile("movq %%cr2,%0 \n\t" : "=r"(Cr2) : : "memory");
-    asm volatile("movq %%cr3,%0 \n\t" : "=r"(Cr3) : : "memory");
+    __asm__ volatile("movq %%cr2,%0 \n\t" : "=r"(Cr2) : : "memory");
+    __asm__ volatile("movq %%cr3,%0 \n\t" : "=r"(Cr3) : : "memory");
 
     outb_str("\nEXC V=");
     outb_hex64(vector);
@@ -175,7 +175,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
 
     if (vector == 8) {
         outb_str("DF HALT\n");
-        while(1) { asm volatile("cli; hlt"); }
+        while(1) { __asm__ volatile("cli; hlt"); }
     }
 
     if (*rip != 0) {
@@ -183,7 +183,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
         *rip += len;
     } else {
         outb_str("NULL RIP HALT\n");
-        while(1) { asm volatile("cli; hlt"); }
+        while(1) { __asm__ volatile("cli; hlt"); }
     }
     
     InExceptionHandler = 0;
@@ -191,7 +191,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
 
 #define EXC_HANDLER_NO_ERROR(vector) \
 __attribute__((naked)) void exception_handler_##vector(void) { \
-    asm volatile( \
+    __asm__ volatile( \
         "pushq $0\n\t" \
         "pushq %%rax\n\t" "pushq %%rcx\n\t" "pushq %%rdx\n\t" "pushq %%rbx\n\t" \
         "pushq %%rbp\n\t" "pushq %%rsi\n\t" "pushq %%rdi\n\t" \
@@ -215,7 +215,7 @@ __attribute__((naked)) void exception_handler_##vector(void) { \
 
 #define EXC_HANDLER_WITH_ERROR(vector) \
 __attribute__((naked)) void exception_handler_##vector(u64 error_code) { \
-    asm volatile( \
+    __asm__ volatile( \
         "pushq %%rax\n\t" "pushq %%rcx\n\t" "pushq %%rdx\n\t" "pushq %%rbx\n\t" \
         "pushq %%rbp\n\t" "pushq %%rsi\n\t" "pushq %%rdi\n\t" \
         "pushq %%r8\n\t"  "pushq %%r9\n\t"  "pushq %%r10\n\t" "pushq %%r11\n\t" \
@@ -324,7 +324,7 @@ void InitIDT() {
 
     idtr.limit = sizeof(idt) - 1;
     idtr.base = (u64)&idt;
-    asm volatile("lidt %0" : : "m"(idtr) : "memory");
+    __asm__ volatile("lidt %0" : : "m"(idtr) : "memory");
 }
 
 void InitInterruptSystem() {

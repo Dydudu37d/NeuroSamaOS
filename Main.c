@@ -65,16 +65,16 @@ void SIMDInit(void) {
 }                                                                                               
 void FPUInit(void){
     u64 cr0;
-    asm volatile("mov %%cr0, %0" : "=r"(cr0));
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
     cr0 &= ~((u64)0xE);
     cr0 |= 0x22;
-    asm volatile("mov %0, %%cr0" : : "r"(cr0));
+    __asm__ volatile("mov %0, %%cr0" : : "r"(cr0));
 }
 #pragma clang optimize on
 
 _Bool IsLa57Supported() {
     unsigned int eax, ebx, ecx, edx;
-    asm volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
     return (ecx & (1 << 16)) != 0;
 }
 
@@ -246,7 +246,7 @@ void LoadDynamicPageTable(u64* root_table) {
     u64 pure_cr3 = ((u64)root_table) & ~0xFFFULL;
 
     if (!IsLa57Supported()) {
-        asm volatile(
+        __asm__ volatile(
             "movq %0, %%cr3\n\t" 
             "movq %%cr3, %%rax\n\t"
             "jmp 1f\n\t"
@@ -271,7 +271,7 @@ void LoadDynamicPageTable(u64* root_table) {
         .base = (u64)temporary_gdt
     };
 
-    asm volatile(
+    __asm__ volatile(
         "movq %0, %%rbx\n\t"
         "lgdt %1\n\t"
         "leaq 1f(%%rip), %%rax\n\t"
@@ -410,12 +410,12 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     u64 *pml5 = BuildDynamicPageTable(MaxAddress, MaxAvailableAddress, bs);
     if (!pml5) {
         DebugStr("BuildDynamicPageTable failed!\n");
-        while(1) asm volatile("cli\n\t hlt");
+        while(1) __asm__ volatile("cli\n\t hlt");
     }
     DebugStr("ExitBootServices.\n");
     DebugStr("ExitBootServices.\n");
     ExitBootServices_Safe(image);
-    asm volatile("cli\n\t");
+    __asm__ volatile("cli\n\t");
     DebugStr("MemFlash.\n");
     MemFullFlash();
     DebugStr("Mov pml4 to cr3.\n");
@@ -435,7 +435,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
 
     u64 StackTop = (u64)KernelStack + 64*1024*1024;
     u64 StackBottom = (u64)KernelStack;
-    asm volatile(
+    __asm__ volatile(
         "movq %0, %%rsp\n\t"
         "movq %1, %%rbp\n\t"
         "jmp kernel_main\n\t"

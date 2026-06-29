@@ -60,7 +60,7 @@ _Bool NvidiaGPUInit(NvidiaGPU *GPU){
     for (u64 i=0;i<10000000;i++){
         GrStatus=NvidiaGPURead32(GPU, 0x00400000);
         if (GrStatus&0x00000001) break;
-        asm volatile("pause");
+        __asm__ volatile("pause");
     }
     GPU->GrStatus=GrStatus;
     GPU->VramSize=PCIGetNvidiaGPUBarSize64(GPU->Bus, GPU->Slot, GPU->Func, 1);

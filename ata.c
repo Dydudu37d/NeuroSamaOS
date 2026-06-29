@@ -6,12 +6,12 @@ ATADriveInfo ATADrives[2][2] = {0};
 
 static inline void ATAWaitBSY(u16 io_base) {
     while (inb(io_base + ATA_REG_STATUS) & ATA_STATUS_BSY)
-        asm volatile("pause");
+        __asm__ volatile("pause");
 }
 
 static inline void ATAWaitDRQ(u16 io_base) {
     while (!(inb(io_base + ATA_REG_STATUS) & ATA_STATUS_DRQ))
-        asm volatile("pause");
+        __asm__ volatile("pause");
 }
 
 static inline u8 ATAReadStatus(u16 io_base) {
@@ -169,7 +169,7 @@ _Bool ATADetectDrive(u8 Channel, u8 Drive) {
             return 0;
         }
         if (status & ATA_STATUS_DRQ) break;
-        asm volatile("pause");
+        __asm__ volatile("pause");
     }
     
     u16 buffer[256];

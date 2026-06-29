@@ -10,7 +10,7 @@ typedef struct{
 } __attribute__((aligned(64))) RegContext;
 
 static inline void SaveContext(RegContext *ctx) {
-    asm volatile(
+    __asm__ volatile(
         "mov %%rax, %0\n"
         "mov %%rcx, %1\n"
         "mov %%rdx, %2\n"
@@ -55,7 +55,7 @@ static inline void SaveContext(RegContext *ctx) {
 }
 
 static inline void LoadContext(RegContext ctx) {
-    asm volatile(
+    __asm__ volatile(
         "xrstor %22\n"
         "mov %17, %%ds\n"
         "mov %18, %%es\n"
