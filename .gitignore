@@ -2,7 +2,7 @@
 *.o
 *.efi
 compile_commands.json
-# 编译产物
+.vscode/
 *.o
 *.efi
 *.fd
