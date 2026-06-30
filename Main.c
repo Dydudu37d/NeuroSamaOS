@@ -19,6 +19,7 @@
 #include "ohci.h"
 #include "hda.h"
 #include "gm206.h"
+#include "uhci.h"
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
@@ -344,7 +345,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     MemCopy(&GopMode,Gop->Mode,sizeof(EFI_GOP_MODE));
     MemCopy(&GopInfo,Gop->Mode->Info,sizeof(EFI_GOP_MODE_INFO));
     GopMode.FrameBufferSize=GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
-    GopOut=(HDR_PIXEL*)(u64)GopMode.FrameBufferBase;
+    GopOut=(u32*)(u64)GopMode.FrameBufferBase;
     DebugStr("\nGop->Mode->Info->PixelFormat = ");
     DebugU32(Gop->Mode->Info->PixelFormat);
     DebugChar('\n');
@@ -427,7 +428,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     }
     InitPool(PoolSize);
     DebugStr("AllocStack.\n");
-    u8* KernelStack = AlignedAlloc(&KernelPool, 64*1024*1024,4096);
+    u8* KernelStack = AlignedAlloc(&KernelPool, 64*1024*1024,16);
     GopBack = (HDR_PIXEL*)(u64)AlignedAlloc(&KernelPool, GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL), 64);
 
     LoadGDT();
@@ -438,7 +439,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     __asm__ volatile(
         "movq %0, %%rsp\n\t"
         "movq %1, %%rbp\n\t"
-        "jmp kernel_main\n\t"
+        "call kernel_main\n\t"
         :
         : "r"(StackTop), "r"(StackBottom)
         : "memory"
@@ -446,7 +447,36 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     return 0;
 }
 
-void kernel_main() {
+void OnRequestComplete(UHCIRequest *req)
+{
+    DebugStr("Request completed: Addr=");
+    DebugU64(req->DeviceAddress);
+    DebugStr(" EP=");
+    DebugU64(req->Endpoint);
+    DebugStr(" Length=");
+    DebugU64(req->ActualLength);
+    DebugStr("\r\n");
+}
+
+void OnRequestError(UHCIRequest *req, UHCIResult error)
+{
+    DebugStr("Request error: ");
+    DebugU64(error);
+    DebugStr(" Addr=");
+    DebugU64(req->DeviceAddress);
+    DebugStr("\r\n");
+}
+
+void OnPortChange(u8 port, u16 status)
+{
+    DebugStr("Port ");
+    DebugU64(port);
+    DebugStr(" changed: 0x");
+    DebugU64(status);
+    DebugStr("\r\n");
+}
+
+__attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("Jumped To KernelMain.\n");
     GopMode.FrameBufferSize=GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
     DebugStr("GopBack = ");
@@ -468,12 +498,7 @@ void kernel_main() {
     DebugU32(GopInfo.PixelFormat);
     DebugChar('\n');
     
-    XhciController* Xhci = XhciInit(GetXhciMmioBase());
-    if (Xhci) {
-        XhciScanPorts(Xhci);
-        DebugStr("XhciScanPorts Finished.\n");
-    }
-    
+    DebugStr("Init ATA.\n");
     ATAInit();
     DebugStr("ATA Init Done.\n");
     
@@ -508,12 +533,88 @@ void kernel_main() {
     } else {
         DebugStr("GTX960 Not Found.\n");
     }
-    DebugStr("Init GTX960 Finish. End\n");
+    DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
+
+    DebugStr("Init UHCI.\n");
+    UHCIHostController *hc;
+    UHCIContext *ctx;
+    for (u8 bus = 0; bus < 256; bus++)
+    {
+        for (u8 slot = 0; slot < 32; slot++)
+        {
+            for (u8 func = 0; func < 8; func++)
+            {
+                u16 vendor = PCIGetVendorID(bus, slot, func);
+                u16 device = PCIGetDeviceID(bus, slot, func);
+
+                if (vendor == 0xFFFF)
+                    continue;
+
+                u8 classCode = PCIGetClassCode(bus, slot, func);
+                u8 subclass = PCIGetSubclass(bus, slot, func);
+                u8 interface = PCIGetInterface(bus, slot, func);
+
+                if (classCode == UHCI_CLASS_CODE &&
+                    subclass == UHCI_SUBCLASS &&
+                    interface == UHCI_INTERFACE)
+                {
+                    DebugStr("Found UHCI: Bus=");
+                    DebugU64(bus);
+                    DebugStr(" Slot=");
+                    DebugU64(slot);
+                    DebugStr(" Func=");
+                    DebugU64(func);
+                    DebugStr("\r\n");
+
+                    hc = UHCICreate(bus, slot, func, &KernelPool);
+                    if (!hc)
+                    {
+                        DebugStr("Failed to create UHCI controller\r\n");
+                        return;
+                    }
+
+                    ctx = Alloc(&KernelPool,sizeof(UHCIContext));
+                    if (!ctx)
+                        return;
+                    memset(ctx, 0, sizeof(UHCIContext));
+
+                    ctx->HC = hc;
+                    ctx->MemoryPool = &KernelPool;
+                    ctx->HandleCompletion = OnRequestComplete;
+                    ctx->HandleError = OnRequestError;
+                    ctx->HandlePortChange = OnPortChange;
+
+                    UHCIResult result = UHCIInitialize(ctx);
+                    if (result != UHCI_OK)
+                    {
+                        DebugStr("UHCI init failed: ");
+                        DebugU64(result);
+                        DebugStr("\r\n");
+                        return;
+                    }
+
+                    UHCIConfigure(ctx, 1, 0);
+
+                    UHCIStart(ctx);
+
+                    DebugStr("UHCI initialized and started\r\n");
+                }
+            }
+        }
+    }
+
+    DebugStr("init XHCI.\n");
+    XhciController *Xhci = XhciInit(GetXhciMmioBase());
+    if (Xhci)
+    {
+        XhciScanPorts(Xhci);
+        DebugStr("XhciScanPorts Finished.\n");
+    }
 
     while (1) {
+        GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0xFFFF));
         TaskPoll();
-        GOPClearAlpha(HDR_Pack(0x0000, 0x0000, 0x0000, 0x8000));
-        GOPClearAlpha(HDR_Pack(0xFFFF, 0x0000, 0x0000, 0x8000));
+        GOPRectFill((u32[2]){0,GopInfo.HorizontalResolution},(u32[2]){0,GopInfo.VerticalResolution},HDR_Pack(0x0000, 0x0000, 0x0000, 0xFFFF));
         GOPFlash();
     }
 }

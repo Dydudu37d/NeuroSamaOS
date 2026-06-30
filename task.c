@@ -7,7 +7,7 @@
 extern RegContext MainGlobalContext;
 extern _Bool IDTGotError;
 
-Task Tasks[MaxTaskCount];
+Task Tasks[MaxTaskCount]={0};
 
 u16 TaskAdd(Task AddTask, _Bool SystemTask){
     u16 StartIdx = SystemTask ? SystemTaskStart : UserTaskStart;

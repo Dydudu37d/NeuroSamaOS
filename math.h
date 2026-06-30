@@ -463,7 +463,7 @@ static inline double DoubleTanh(double x) {
         : "=m"(result)
         : "m"(x), "m"(ax),
           "m"(0.5),
-          "m"(0.33333333333333333333333333333333333333333333333333),
+          "m"(0.33333333333333333333333333333333333333333333333333L),
           "m"(DOUBLE_ONE)
         : "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "memory"
     );

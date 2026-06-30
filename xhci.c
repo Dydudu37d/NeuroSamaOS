@@ -8,13 +8,13 @@
 
 extern AllocPool KernelPool;
 
-static void XhciRingDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId) {
+void XhciRingDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId) {
     u64 doorbell = Xhci->DoorbellBase + (SlotId * 4);
     *(volatile u32*)doorbell = (u32)EpId;
     __asm__ volatile("mfence" ::: "memory");
 }
 
-static void XhciAdvanceEnqueue(XhciEpRing* ring, u32 count) {
+void XhciAdvanceEnqueue(XhciEpRing* ring, u32 count) {
     ring->Enqueue += count;
     if (ring->Enqueue >= ring->RingSize) {
         ring->Enqueue = 0;

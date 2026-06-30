@@ -127,13 +127,13 @@ static inline void PCIScanBus(void)
     }
 }
 
-static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass)
+static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 TargetProgIF, u8 *OutBus, u8 *OutDev, u8 *OutFunc)
 {
     for (u16 Bus = 0; Bus < 256; Bus++)
     {
-        for (u8 Dev = 0; Dev < 32; Dev++)
+        for (u16 Dev = 0; Dev < 32; Dev++)
         {
-            for (u8 Func = 0; Func < 8; Func++)
+            for (u16 Func = 0; Func < 8; Func++)
             {
                 u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
                 if ((VendorDevice & 0xFFFF) == 0xFFFF)
@@ -145,10 +145,15 @@ static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass)
                 u32 ClassRev = PCIReadDWORD(Bus, Dev, Func, 0x08);
                 u8 ClassCode = (ClassRev >> 24) & 0xFF;
                 u8 SubClass = (ClassRev >> 16) & 0xFF;
-                
-                if (ClassCode == TargetClass && SubClass == TargetSubClass)
+                u8 ProgIF = (ClassRev >> 8) & 0xFF;
+
+                if (ClassCode == TargetClass && SubClass == TargetSubClass && ProgIF == TargetProgIF)
                 {
                     PCIEnableDevice(Bus, Dev, Func);
+                    *OutBus=Bus;
+                    *OutDev=Dev;
+                    *OutFunc=Func;
+                    return;
                 }
             }
         }

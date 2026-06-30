@@ -8,14 +8,6 @@ extern AllocPool KernelPool;
 
 #define MAX_ESP_PARTITIONS 8
 
-typedef struct {
-    u64 StartLba;
-    u64 EndLba;
-    u8 Channel;
-    u8 Drive;
-    _Bool Valid;
-} ESPEntry;
-
 static ESPEntry g_esp_partitions[MAX_ESP_PARTITIONS] = {0};
 static u32 g_esp_count = 0;
 

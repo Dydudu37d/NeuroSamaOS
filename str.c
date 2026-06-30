@@ -80,7 +80,7 @@ void MemCopy(void* D, const void* S, size_t size) {
 
 void MemSet(void* D, const u8 S, size_t size) {
     if (size==0) return;
-    if (size >= 2000000 && ((u64)D & 0x1F) == 0) {
+    if (size >= 1000000 && ((u64)D & 0x0F) == 0 && (size & 0x03) == 0) {
         size_t loops = size / 32;
 
         __asm__ __volatile__(
@@ -108,7 +108,7 @@ void MemSet(void* D, const u8 S, size_t size) {
 
 void MemSet16(void* D, const u16 S, size_t size) {
     if (size==0) return;
-    if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
+    if (size >= 1000000 && ((u64)D & 0x0F) == 0 && (size & 0x03) == 0) {
         size_t loops = size / 16; 
 
         __asm__ __volatile__(
@@ -138,7 +138,7 @@ void MemSet16(void* D, const u16 S, size_t size) {
 
 void MemSet32(void* D, const u32 S, size_t size) {
     if (size==0) return;
-    if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
+    if (size >= 1000000 && ((u64)D & 0x0F) == 0 && (size & 0x03) == 0) {
         size_t loops = size / 8; 
 
         __asm__ __volatile__(
@@ -168,7 +168,7 @@ void MemSet32(void* D, const u32 S, size_t size) {
 
 void MemSet64(void* D, const u64 S, size_t size) {
     if (size==0) return;
-    if (size >= 1000000 && ((u64)D & 0x1F) == 0) {
+    if (size >= 1000000 && ((u64)D & 0x0F) == 0 && (size & 0x03) == 0) {
         size_t loops = size / 4; 
 
         __asm__ __volatile__(

@@ -1,5 +1,5 @@
 CC := clang
-CCArg = --target=x86_64-unknown-windows-msvc \
+CCArg = --target=x86_64-unknown-windows-gnu \
         -ffreestanding \
         -nostdlib \
         -mno-red-zone \
@@ -8,12 +8,14 @@ CCArg = --target=x86_64-unknown-windows-msvc \
         -m64 \
         -fno-stack-protector \
         -mno-stack-arg-probe -g -fno-builtin -ffreestanding \
-		-fno-builtin-all -mllvm --max-store-memcpy=999999 -fno-builtin -fno-builtin-memcpy -fno-builtin-memset
+		-fno-builtin-all -mllvm --max-store-memcpy=999999 -fno-builtin \
+		-fno-builtin-memcpy -fno-builtin-memset -ffreestanding -nostdinc -nostdlib -mstack-alignment=16
 
-LDArg = --target=x86_64-unknown-windows-msvc \
-        -nostdlib \
-		-Wl,-subsystem:efi_application \
-		-Wl,-entry:efi_main
+LD := ld.lld
+LDArg = -m i386pep \
+	--entry=efi_main \
+	--no-undefined \
+	--gc-sections 
 
 S_OBJS = $(wildcard *.s)
 C_OBJS = $(wildcard *.c)
@@ -33,22 +35,8 @@ O_OBJS = $(patsubst %.c,%.o,$(C_OBJS)) \
 	$(CC) $(CCArg) -c $< -o $@
 
 boot.efi: $(O_OBJS)
-	$(CC) $(LDArg) $^ -o boot.exe
+	$(LD) $(LDArg) $^ -o boot.exe
 	llvm-objcopy --subsystem=efi-app boot.exe $@
-
-run: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
-	qemu-system-x86_64 \
-		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
-		-drive format=raw,file=fat:rw:disk \
-		-m 4G \
-		-smp 2 \
-		-serial stdio \
-		-cpu Broadwell,phys-bits=48,la57=on \
-		-boot order=d -device qemu-xhci\
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device pvscsi,vendor-id=0x10de,device-id=0x1401
 
 run-whpx: boot.efi
 	mkdir -p disk/EFI/BOOT/
@@ -60,12 +48,12 @@ run-whpx: boot.efi
 		-smp 2 \
 		-serial stdio \
 		-accel whpx \
-		-cpu Broadwell,phys-bits=48,la57=on \
+		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d -device qemu-xhci\
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device pvscsi,vendor-id=0x10de,device-id=0x1401
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown -overcommit mem-lock=on
 
-run-vnc: boot.efi
+
+debug-whpx: boot.efi
 	mkdir -p disk/EFI/BOOT/
 	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
 	qemu-system-x86_64 \
@@ -74,40 +62,72 @@ run-vnc: boot.efi
 		-m 4G \
 		-smp 2 \
 		-serial stdio \
-		-vnc :1 \
-		-cpu Broadwell,phys-bits=48,la57=on \
-		-boot order=d -device qemu-xhci\
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device pvscsi,vendor-id=0x10de,device-id=0x1401
-
-debug: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
-	qemu-system-x86_64 \
-		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
-		-drive format=raw,file=fat:rw:disk \
-		-m 4G \
-		-smp 2 \
-		-serial stdio \
-		-cpu Broadwell,phys-bits=48,la57=on \
+		-accel whpx \
+		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
-		-s -S -no-reboot -no-shutdown \
-		-device pvscsi,vendor-id=0x10de,device-id=0x1401
+		-s -S -no-reboot -no-shutdown -overcommit mem-lock=on
 
-debug-vnc: boot.efi
+run-kvm: boot.efi
 	mkdir -p disk/EFI/BOOT/
 	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	sudo prlimit --memlock=unlimited \
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
 		-drive format=raw,file=fat:rw:disk \
 		-m 4G \
 		-smp 2 \
 		-serial stdio \
-		-vnc :1 \
-		-cpu Broadwell,phys-bits=48,la57=on \
+		-accel kvm \
+		-cpu Broadwell,hle=off,rtm=off \
+		-boot order=d -device qemu-xhci \
+		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown -overcommit mem-lock=on
+
+
+debug-kvm: boot.efi
+	mkdir -p disk/EFI/BOOT/
+	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	sudo prlimit --memlock=unlimited \
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
+		-drive format=raw,file=fat:rw:./disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel kvm \
+		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
-		-s -S -no-reboot -no-shutdown \
-		-device pvscsi,vendor-id=0x10de,device-id=0x1401
+		-s -S -no-reboot -no-shutdown -overcommit mem-lock=on
+
+run-tcg: boot.efi
+	mkdir -p disk/EFI/BOOT/
+	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	sudo prlimit --memlock=unlimited \
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel tcg \
+		-cpu Broadwell,hle=off,rtm=off \
+		-boot order=d -device qemu-xhci \
+		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown -overcommit mem-lock=on
+
+
+debug-tcg: boot.efi
+	mkdir -p disk/EFI/BOOT/
+	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	sudo prlimit --memlock=unlimited \
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=off \
+		-drive format=raw,file=fat:rw:./disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel tcg \
+		-cpu Broadwell,hle=off,rtm=off \
+		-boot order=d \
+		-s -S -no-reboot -no-shutdown -overcommit mem-lock=on
 
 clear:
 	rm -rf *.o boot.efi disk/ boot.dll

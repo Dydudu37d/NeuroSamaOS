@@ -4,6 +4,7 @@
 #include "str.h"
 
 void WMAddWindow(WM *WinM, Window *Win){
+    if (!WinM || !Win || !WinM->Windows) return;
     for (u64 Idx=0;Idx<WinM->WindowEnd+1;Idx++){
         if (!WinM->Windows[Idx]) {
             WinM->Windows[Idx]=Win;
@@ -15,8 +16,9 @@ void WMAddWindow(WM *WinM, Window *Win){
 }
 
 void WMDelWindow(WM *WinM, const char *Title){
+    if (!WinM || !WinM->Windows || !Title) return;
     for (u64 Idx=0;Idx<WinM->WindowEnd;Idx++){
-        if (!WinM->Windows[Idx]) continue;
+        if (!WinM->Windows[Idx] || !WinM->Windows[Idx]->Title) continue;
         if (StrIs(WinM->Windows[Idx]->Title,Title)) WinM->Windows[Idx]=NULL;
         WinM->Count--;
         return;
@@ -24,6 +26,7 @@ void WMDelWindow(WM *WinM, const char *Title){
 }
 
 void WMPoll(WM *WinM){
+    if (!WinM || !WinM->Windows) return;
     for (u64 Idx=0;Idx<WinM->WindowEnd;Idx++){
         if ((!WinM->Windows[Idx]) || (!WinM->Windows[Idx]->Poll) || (!WinM->Windows[Idx]->Base.Draw)) continue;
         WinM->Windows[Idx]->Poll(WinM->Windows[Idx]);

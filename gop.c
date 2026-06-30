@@ -122,7 +122,7 @@ void GOPRect(u32 x[2], u32 y[2], HDR_PIXEL hdr){
     MemFlash();
 }
 
-static inline void GOPRectFillFast(u32 startX, u32 endX, u32 startY, u32 endY, HDR_PIXEL hdr) {
+__attribute__((force_align_arg_pointer)) __attribute__((aligned(16))) static inline void GOPRectFillFast(u32 startX, u32 endX, u32 startY, u32 endY, HDR_PIXEL hdr) {
     u32 width = endX - startX;
     
     if (width == GopInfo.PixelsPerScanLine) {
@@ -161,7 +161,7 @@ static inline void GOPRectFillFast(u32 startX, u32 endX, u32 startY, u32 endY, H
     }
 }
 
-static inline void GOPRectFillAlpha(u32 startX, u32 endX, u32 startY, u32 endY, HDR_PIXEL hdr, u8 bitCount) {
+__attribute__((force_align_arg_pointer)) static inline void GOPRectFillAlpha(u32 startX, u32 endX, u32 startY, u32 endY, HDR_PIXEL hdr, u8 bitCount) {
     u32 sA = HDR_Unpack_A(hdr);
     if (sA == 0) return;
     if (sA == 0xFFFF) {
@@ -177,7 +177,7 @@ static inline void GOPRectFillAlpha(u32 startX, u32 endX, u32 startY, u32 endY, 
     }
 }
 
-void GOPRectFill(u32 x[2], u32 y[2], HDR_PIXEL hdr){
+__attribute__((force_align_arg_pointer)) __attribute__((aligned(16))) void GOPRectFill(u32 x[2], u32 y[2], HDR_PIXEL hdr){
     u32 startX = x[0], startY = y[0];
     u32 endX = x[1], endY = y[1];
     
@@ -202,13 +202,13 @@ void GOPRectFill(u32 x[2], u32 y[2], HDR_PIXEL hdr){
     }
 }
 
-void GOPClear(HDR_PIXEL hdr) {
+__attribute__((force_align_arg_pointer)) __attribute__((aligned(16))) void GOPClear(HDR_PIXEL hdr) {
     u32 pixelCount = GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution;
     MemSet64(GopBack, hdr, pixelCount);
     MemFlash();
 }
 
-void GOPClearAlpha(HDR_PIXEL hdr) {
+__attribute__((force_align_arg_pointer)) __attribute__((aligned(16))) void GOPClearAlpha(HDR_PIXEL hdr) {
     u32 totalPixels = GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution;
     u8 bitCount = 16;
     if (GopInfo.PixelFormat == PixelBitMask) {
@@ -245,7 +245,7 @@ static inline u32 GOPackPixel(HDR_PIXEL p, u32 rShift, u32 gShift, u32 bShift, u
     return (r << rShift) | (g << gShift) | (b << bShift) | (a << aShift);
 }
 
-void GOPFlash() {
+__attribute__((force_align_arg_pointer)) __attribute__((aligned(16))) void GOPFlash() {
     u32 pixelCount = GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution;
     u32* fb = (u32*)GopOut;
 
