@@ -21,6 +21,6 @@ typedef struct MouseDevice {
 #define USB_DIR_IN             0x80
 #define USB_DIR_OUT            0x00
 
-void MouseInit(XhciController* Xhci);
+MouseDevice* MouseInit(XhciController *Xhci);
 void MousePoll(MouseDevice* Mouse);
 void MouseGetDelta(MouseDevice* Mouse, s16* Dx, s16* Dy, u8* Buttons);

@@ -150,7 +150,7 @@ static void MousePrepareTransfer(MouseDevice* Mouse) {
     }
 }
 
-void MouseInit(XhciController* Xhci) {
+MouseDevice* MouseInit(XhciController *Xhci){
     u32 hcsparams1 = Xhci->Cap->Hcsparams1;
     u8 maxSlots = hcsparams1 & 0xFF;
 
@@ -229,7 +229,7 @@ void MouseInit(XhciController* Xhci) {
 
                 ActiveMouse = mouse;
                 DebugStr("MOUSE INIT DONE\n");
-                return;
+                return mouse;
             }
         }
     }

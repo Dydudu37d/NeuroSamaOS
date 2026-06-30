@@ -59,3 +59,54 @@ void DebugU8(u8 B) {
     DebugChar(hex[(B&0x000000000000000F)>>0 ]);
 }
 
+void DebugI64(s64 LLU)
+{
+    if (LLU < 0)
+    {
+        DebugChar('-');
+        DebugU64((u64)(-LLU));
+    }
+    else
+    {
+        DebugU64((u64)LLU);
+    }
+}
+
+void DebugI32(s32 LU)
+{
+    if (LU < 0)
+    {
+        DebugChar('-');
+        DebugU32((u32)(-LU));
+    }
+    else
+    {
+        DebugU32((u32)LU);
+    }
+}
+
+void DebugI16(s16 D)
+{
+    if (D < 0)
+    {
+        DebugChar('-');
+        DebugU16((u16)(-D));
+    }
+    else
+    {
+        DebugU16((u16)D);
+    }
+}
+
+void DebugI8(s8 B)
+{
+    if (B < 0)
+    {
+        DebugChar('-');
+        DebugU8((u8)(-B));
+    }
+    else
+    {
+        DebugU8((u8)B);
+    }
+}

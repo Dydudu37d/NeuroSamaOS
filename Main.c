@@ -20,6 +20,8 @@
 #include "hda.h"
 #include "gm206.h"
 #include "uhci.h"
+#include "UhciMouse.h"
+#include "UhciKeyboard.h"
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
@@ -313,6 +315,48 @@ void LoadDynamicPageTable(u64* root_table) {
     );
 }
 
+u32 GetGopByWH(u64 W, u64 H)
+{
+    EFI_STATUS Status;
+    u32 BestMode = (u32)-1;
+    u64 BestDiff = ~0ULL;
+    u64 TargetArea = W * H;
+
+    if (Gop == NULL || Gop->Mode == NULL)
+    {
+        return BestMode;
+    }
+
+    for (u32 i = 0; i < Gop->Mode->MaxMode; i++)
+    {
+        EFI_GOP_MODE_INFO *Info = NULL;
+        UINTN SizeOfInfo = 0;
+
+        Status = Gop->QueryMode(Gop, i, &SizeOfInfo, &Info);
+        if (EFI_ERROR(Status))
+        {
+            continue;
+        }
+
+        u64 CurrentArea = Info->HorizontalResolution * Info->VerticalResolution;
+        u64 Diff = (CurrentArea > TargetArea) ? (CurrentArea - TargetArea) : (TargetArea - CurrentArea);
+
+        DebugStr("W:");
+        DebugU64(Info->HorizontalResolution);
+        DebugStr(" H:");
+        DebugU64(Info->VerticalResolution);
+        DebugChar('\n');
+
+        if (Diff < BestDiff)
+        {
+            BestDiff = Diff;
+            BestMode = i;
+        }
+    }
+
+    return BestMode;
+}
+
 EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     bs=sys->BootServices;
     SIMDInit();
@@ -341,7 +385,13 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     }
 
     bs->LocateProtocol(&GopGuid, NULL, (void **)&Gop);
-    Gop->SetMode(Gop,0);
+
+    EFI_STATUS Status = Gop->SetMode(Gop, GetGopByWH(1280,720));
+    if (status != EFI_SUCCESS)
+    {
+        DebugStr("\r\n[NeuroSamaOS] GOP Init Faild.\n");
+        while(1) __asm__ volatile("cli\n\t hlt");
+    }
     MemCopy(&GopMode,Gop->Mode,sizeof(EFI_GOP_MODE));
     MemCopy(&GopInfo,Gop->Mode->Info,sizeof(EFI_GOP_MODE_INFO));
     GopMode.FrameBufferSize=GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
@@ -536,27 +586,29 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
 
     DebugStr("Init UHCI.\n");
-    UHCIHostController *hc;
-    UHCIContext *ctx;
-    for (u8 bus = 0; bus < 256; bus++)
+    UHCIHostController *hc=NULL;
+    UHCIContext *ctx=NULL;
+    _Bool UhciFound = 0;
+    for (u16 bus = 0; bus < 256; bus++)
     {
-        for (u8 slot = 0; slot < 32; slot++)
+        for (u16 slot = 0; slot < 32; slot++)
         {
-            for (u8 func = 0; func < 8; func++)
+            for (u16 func = 0; func < 8; func++)
             {
-                u16 vendor = PCIGetVendorID(bus, slot, func);
-                u16 device = PCIGetDeviceID(bus, slot, func);
+                u32 VendorDevice = PCIReadDWORD(bus, slot, func, 0x00);
+                u16 vendor = VendorDevice & 0xFFFF;
 
                 if (vendor == 0xFFFF)
                     continue;
 
-                u8 classCode = PCIGetClassCode(bus, slot, func);
-                u8 subclass = PCIGetSubclass(bus, slot, func);
-                u8 interface = PCIGetInterface(bus, slot, func);
+                u32 ClassRev = PCIReadDWORD(bus, slot, func, 0x08);
+                u8 ClassCode = (ClassRev >> 24) & 0xFF;
+                u8 SubClass = (ClassRev >> 16) & 0xFF;
+                u8 ProgIF = (ClassRev >> 8) & 0xFF;
 
-                if (classCode == UHCI_CLASS_CODE &&
-                    subclass == UHCI_SUBCLASS &&
-                    interface == UHCI_INTERFACE)
+                if (ClassCode == UHCI_CLASS_CODE &&
+                    SubClass == UHCI_SUBCLASS &&
+                    ProgIF == UHCI_INTERFACE)
                 {
                     DebugStr("Found UHCI: Bus=");
                     DebugU64(bus);
@@ -576,7 +628,7 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
                     ctx = Alloc(&KernelPool,sizeof(UHCIContext));
                     if (!ctx)
                         return;
-                    memset(ctx, 0, sizeof(UHCIContext));
+                    MemSet(ctx, 0, sizeof(UHCIContext));
 
                     ctx->HC = hc;
                     ctx->MemoryPool = &KernelPool;
@@ -598,6 +650,7 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
                     UHCIStart(ctx);
 
                     DebugStr("UHCI initialized and started\r\n");
+                    UhciFound=1;
                 }
             }
         }
@@ -611,10 +664,43 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("XhciScanPorts Finished.\n");
     }
 
-    while (1) {
-        GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0xFFFF));
-        TaskPoll();
-        GOPRectFill((u32[2]){0,GopInfo.HorizontalResolution},(u32[2]){0,GopInfo.VerticalResolution},HDR_Pack(0x0000, 0x0000, 0x0000, 0xFFFF));
-        GOPFlash();
+    MouseDevice* XhciMouse=MouseInit(Xhci);
+    KeyboardDevice* XhciKerboard=KeyboardInit(Xhci);
+    if(UhciFound){
+        USBMouse* UhciMouse=NULL;
+        USBKeyboard* UhciKeyboard=NULL;
+        for (u8 port = 0; port < 2; port++) {
+            u16 portStatus = UHCIGetPortStatus(ctx, port);
+            
+            if (portStatus & UHCI_PORTSC_CCS) {
+                DebugStr("Device connected on port ");
+                DebugU64(port);
+                DebugChar('\n');
+                
+                UhciMouse = USBMouseInit(ctx, port);
+                if (UhciMouse) {
+                    DebugStr("Mouse initialized on port ");
+                    DebugU64(port);
+                    DebugChar('\n');
+                } else {
+                    UhciKeyboard = USBKeyboardInit(ctx, port);
+                    if (UhciKeyboard) {
+                        DebugStr("Keyboard initialized on port ");
+                        DebugU64(port);
+                        DebugChar('\n');
+                    }
+                }
+            }
+        }
+        if (!UhciMouse) DebugStr("No Uhci Mouse Drive.\n");
+        if (!UhciKeyboard) DebugStr("No Uhci Keyboard Drive.\n");
     }
+
+    while (1)
+        {
+            GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x0000));
+            TaskPoll();
+            GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFF00, 0xFF00, 0x7FFF));
+            GOPFlash();
+        }
 }
