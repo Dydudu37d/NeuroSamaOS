@@ -12,8 +12,8 @@ typedef struct{
 static inline void SaveContext(RegContext *ctx) {
     __asm__ volatile(
         "mov %%rax, %0\n"
-        "mov %%rcx, %1\n"
         "mov %%rdx, %2\n"
+        "mov %%rcx, %1\n"
         "mov %%rbx, %3\n"
         "mov %%rsp, %4\n"
         "mov %%rbp, %5\n"
@@ -35,6 +35,8 @@ static inline void SaveContext(RegContext *ctx) {
         "mov %%ss, %21\n"
         "pushfq\n"
         "popq %22\n"
+        "mov $0xFFFFFFFF, %%eax\n"
+        "mov $0xFFFFFFFF, %%edx\n"
         "xsave %23\n"
         : "=m"(ctx->Reg0t15[0]),  "=m"(ctx->Reg0t15[1]),
           "=m"(ctx->Reg0t15[2]),  "=m"(ctx->Reg0t15[3]),
@@ -50,12 +52,15 @@ static inline void SaveContext(RegContext *ctx) {
           "=m"(ctx->rflags),
           "=m"(ctx->SIMDBuffer)
         :
-        : "memory"
+        : "memory", "rax", "rdx", "cc" 
     );
 }
 
 static inline void LoadContext(RegContext ctx) {
     __asm__ volatile(
+        "mov %4,  %%rsp\n"
+        "mov $0xFFFFFFFF, %%eax\n"
+        "mov $0xFFFFFFFF, %%edx\n"
         "xrstor %22\n"
         "mov %17, %%ds\n"
         "mov %18, %%es\n"
@@ -79,7 +84,6 @@ static inline void LoadContext(RegContext ctx) {
         "mov %13, %%r13\n"
         "mov %14, %%r14\n"
         "mov %15, %%r15\n"
-        "mov %4,  %%rsp\n"
         :
         : "m"(ctx.Reg0t15[0]),  "m"(ctx.Reg0t15[1]),
           "m"(ctx.Reg0t15[2]),  "m"(ctx.Reg0t15[3]),
@@ -93,7 +97,7 @@ static inline void LoadContext(RegContext ctx) {
           "m"(ctx.fs),  "m"(ctx.gs),
           "m"(ctx.ss),  "m"(ctx.rflags),
           "m"(ctx.SIMDBuffer)
-        : "memory"
+        : "memory", "rax", "rdx"
     );
 }
 

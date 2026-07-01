@@ -67,11 +67,14 @@ static inline void PCIEnableDevice(u8 Bus, u8 Slot, u8 Func)
 static inline u64 PCIGetBARAddress(u8 Bus, u8 Slot, u8 Func, u8 BarIndex) {
     u32 barLow = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4);
     
+    if (barLow & 0x1) {
+        return barLow & ~0x3;
+    }
+    
     if ((barLow & 0x6) == 0x4) {
         u32 barHigh = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4 + 4);
         return ((u64)barHigh << 32) | (barLow & ~0xF);
     }
-    
     return barLow & ~0xF;
 }
 

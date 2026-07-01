@@ -588,119 +588,106 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("Init UHCI.\n");
     UHCIHostController *hc=NULL;
     UHCIContext *ctx=NULL;
-    _Bool UhciFound = 0;
-    for (u16 bus = 0; bus < 256; bus++)
-    {
-        for (u16 slot = 0; slot < 32; slot++)
-        {
-            for (u16 func = 0; func < 8; func++)
-            {
-                u32 VendorDevice = PCIReadDWORD(bus, slot, func, 0x00);
-                u16 vendor = VendorDevice & 0xFFFF;
+    USBMouse* UhciMouse=NULL;
+    USBKeyboard* UhciKeyboard=NULL;
+    u8 Bus, Dev, Func;
+    PCIFindDeviceByClass(UHCI_CLASS_CODE, UHCI_SUBCLASS, UHCI_INTERFACE, &Bus, &Dev, &Func);
+    _Bool UhciFound = Bus != 0xFF;
+    if (Bus != 0xFF) {
+        DebugStr("Found UHCI: Bus=");
+        DebugU64(Bus);
+        DebugStr(" Slot=");
+        DebugU64(Dev);
+        DebugStr(" Func=");
+        DebugU64(Func);
+        DebugStr("\r\n");
 
-                if (vendor == 0xFFFF)
-                    continue;
+        hc = UHCICreate(Bus, Dev, Func, &KernelPool);
+        if (!hc) {
+            DebugStr("Failed to create UHCI controller\r\n");
+            return;
+        }
 
-                u32 ClassRev = PCIReadDWORD(bus, slot, func, 0x08);
-                u8 ClassCode = (ClassRev >> 24) & 0xFF;
-                u8 SubClass = (ClassRev >> 16) & 0xFF;
-                u8 ProgIF = (ClassRev >> 8) & 0xFF;
+        ctx = Alloc(&KernelPool, sizeof(UHCIContext));
+        if (!ctx) return;
+        MemSet(ctx, 0, sizeof(UHCIContext));
 
-                if (ClassCode == UHCI_CLASS_CODE &&
-                    SubClass == UHCI_SUBCLASS &&
-                    ProgIF == UHCI_INTERFACE)
-                {
-                    DebugStr("Found UHCI: Bus=");
-                    DebugU64(bus);
-                    DebugStr(" Slot=");
-                    DebugU64(slot);
-                    DebugStr(" Func=");
-                    DebugU64(func);
-                    DebugStr("\r\n");
+        ctx->HC = hc;
+        ctx->MemoryPool = &KernelPool;
+        ctx->HandleCompletion = OnRequestComplete;
+        ctx->HandleError = OnRequestError;
+        ctx->HandlePortChange = OnPortChange;
 
-                    hc = UHCICreate(bus, slot, func, &KernelPool);
-                    if (!hc)
-                    {
-                        DebugStr("Failed to create UHCI controller\r\n");
-                        return;
-                    }
+        UHCIResult result = UHCIInitialize(ctx);
+        if (result != UHCI_OK) {
+            DebugStr("UHCI init failed: ");
+            DebugU64(result);
+            DebugStr("\r\n");
+            return;
+        }
 
-                    ctx = Alloc(&KernelPool,sizeof(UHCIContext));
-                    if (!ctx)
-                        return;
-                    MemSet(ctx, 0, sizeof(UHCIContext));
+        UHCIConfigure(ctx, 1, 0);
+        UHCIStart(ctx);
 
-                    ctx->HC = hc;
-                    ctx->MemoryPool = &KernelPool;
-                    ctx->HandleCompletion = OnRequestComplete;
-                    ctx->HandleError = OnRequestError;
-                    ctx->HandlePortChange = OnPortChange;
+        DebugStr("UHCI initialized and started\r\n");
 
-                    UHCIResult result = UHCIInitialize(ctx);
-                    if (result != UHCI_OK)
-                    {
-                        DebugStr("UHCI init failed: ");
-                        DebugU64(result);
-                        DebugStr("\r\n");
-                        return;
-                    }
+        u16 Port0 = UHCIGetPortStatus(ctx, 0);
+        u16 Port1 = UHCIGetPortStatus(ctx, 1);
+        DebugStr("Port0 raw: 0x");
+        DebugU64(Port0);
+        DebugStr("\r\n");
+        DebugStr("Port1 raw: 0x");
+        DebugU64(Port1);
+        DebugStr("\r\n");
 
-                    UHCIConfigure(ctx, 1, 0);
+        if (Port0 != 0xFFFF && (Port0 & UHCI_PORTSC_CCS)) {
+            DebugStr("Device connected on port 00\r\n");
+            UHCIResetPort(ctx, 0);
+            UHCIEnablePort(ctx, 0);
+            UhciMouse = USBMouseInit(ctx, 0);
+            TaskAdd((Task){.Active=1,.Arg=UhciMouse,.CallFunc=(void*)USBMousePoll,.DelFunc=NULL,.Name="UhciMouse",.NextWaitNs=0,.IntervalNs=1},1);
+        }
 
-                    UHCIStart(ctx);
-
-                    DebugStr("UHCI initialized and started\r\n");
-                    UhciFound=1;
-                }
-            }
+        if (Port1 != 0xFFFF && (Port1 & UHCI_PORTSC_CCS)) {
+            DebugStr("Device connected on port 01\r\n");
+            UHCIResetPort(ctx, 1);
+            UHCIEnablePort(ctx, 1);
+            UhciKeyboard = USBKeyboardInit(ctx, 1);
+            TaskAdd((Task){.Active=1,.Arg=UhciKeyboard,.CallFunc=(void*)USBKeyboardPoll,.DelFunc=NULL,.Name="UhciKeyboard",.NextWaitNs=0,.IntervalNs=1},1);
         }
     }
+    if (!UhciMouse) DebugStr("No Uhci Mouse Drive.\n");
+    if (!UhciKeyboard) DebugStr("No Uhci Keyboard Drive.\n");
 
-    DebugStr("init XHCI.\n");
-    XhciController *Xhci = XhciInit(GetXhciMmioBase());
-    if (Xhci)
-    {
-        XhciScanPorts(Xhci);
-        DebugStr("XhciScanPorts Finished.\n");
-    }
-
-    MouseDevice* XhciMouse=MouseInit(Xhci);
-    KeyboardDevice* XhciKerboard=KeyboardInit(Xhci);
-    if(UhciFound){
-        USBMouse* UhciMouse=NULL;
-        USBKeyboard* UhciKeyboard=NULL;
-        for (u8 port = 0; port < 2; port++) {
-            u16 portStatus = UHCIGetPortStatus(ctx, port);
+    DebugStr("Loop.\n");
+    u8 prevModifiers = 0;
+    u8 prevKeys[6] = {0};
+    while (1){
+        GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x0000));
+        TaskPoll();
+        if (UhciKeyboard){
+            u8 modifiers = USBKeyboardGetModifiers(UhciKeyboard);
+            u8 count = USBKeyboardGetKeyCount(UhciKeyboard);
             
-            if (portStatus & UHCI_PORTSC_CCS) {
-                DebugStr("Device connected on port ");
-                DebugU64(port);
-                DebugChar('\n');
-                
-                UhciMouse = USBMouseInit(ctx, port);
-                if (UhciMouse) {
-                    DebugStr("Mouse initialized on port ");
-                    DebugU64(port);
-                    DebugChar('\n');
-                } else {
-                    UhciKeyboard = USBKeyboardInit(ctx, port);
-                    if (UhciKeyboard) {
-                        DebugStr("Keyboard initialized on port ");
-                        DebugU64(port);
-                        DebugChar('\n');
-                    }
+            u8 changed = 0;
+            if (modifiers != prevModifiers) changed = 1;
+            for (u8 j = 0; j < 6; j++) {
+                if (USBKeyboardGetKey(UhciKeyboard, j) != prevKeys[j]) {
+                    changed = 1;
+                    break;
+                }
+            }
+            
+            if (changed) {
+                USBKeyboardPrintKeys(UhciKeyboard);
+                prevModifiers = modifiers;
+                for (u8 j = 0; j < 6; j++) {
+                    prevKeys[j] = USBKeyboardGetKey(UhciKeyboard, j);
                 }
             }
         }
-        if (!UhciMouse) DebugStr("No Uhci Mouse Drive.\n");
-        if (!UhciKeyboard) DebugStr("No Uhci Keyboard Drive.\n");
-    }
 
-    while (1)
-        {
-            GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x0000));
-            TaskPoll();
-            GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFF00, 0xFF00, 0x7FFF));
-            GOPFlash();
-        }
+        GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFF00, 0xFF00, 0x7FFF));
+        GOPFlash();
+    }
 }

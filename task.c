@@ -48,6 +48,7 @@ void TaskPoll(void){
             }
             
             if (IDTGotError){
+                Tasks[i].Active = false;
                 LoadContext(MainGlobalContext);
                 IDTCloseError();
             }

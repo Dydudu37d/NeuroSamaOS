@@ -10,17 +10,19 @@
 #define TypeShort (1<<5)
 #define TypePointer (1<<6)
 #define TypeVoid (1<<7)
+#define TypeList (1<<8)
 #define VarUnUse 0
 
 typedef struct{
     u64 SerialNumber;
-    u8 Type;
+    u16 Type;
+    u64 size;
     void* DataPoint;
 }__attribute__((packed)) JITVar;
 
 typedef struct{
     u64 SerialNumber;
-    u8 Type;
+    u16 Type;
     void* FuncPoint;
 }__attribute__((packed)) JITFunc;
 

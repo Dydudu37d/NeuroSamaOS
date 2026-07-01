@@ -101,12 +101,12 @@ static inline double DoubleMod2PI(double x) {
     return result;
 }
 
-static inline float FloatSin(float x) {
+static inline float DoubleSin(double x) {
     if (x != x) return x;
     if (x > 1e7f || x < -1e7f) return 0.0f;
     
-    float sign = 1.0f;
-    float result;
+    double sign = 1.0f;
+    double result;
     
     __asm__ volatile (
         "movss       %1,       %%xmm0\n\t"

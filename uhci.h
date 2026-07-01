@@ -49,10 +49,10 @@
 #define UHCI_PORTSC_PEC 0x0008
 #define UHCI_PORTSC_DPLUS 0x0010
 #define UHCI_PORTSC_DMINUS 0x0020
-#define UHCI_PORTSC_RD 0x0040
+#define UHCI_PORTSC_RD 0x0200
 #define UHCI_PORTSC_RESERVED 0x0080
 #define UHCI_PORTSC_LSDA 0x0100
-#define UHCI_PORTSC_PR 0x0200
+#define UHCI_PORTSC_PR 0x0100
 #define UHCI_PORTSC_SUSP 0x1000
 
 #define UHCI_TD_ACTIVE 0x00800000
@@ -186,6 +186,7 @@ typedef struct UHCIPortStatus
     u8 LineStatusDMinus;
 } UHCIPortStatus;
 
+typedef struct UHCIContext UHCIContext;
 typedef struct UHCIRequest
 {
     u8 DeviceAddress;
@@ -214,6 +215,7 @@ typedef struct UHCIRequest
     u32 DataPhys;
     u32 TDPhys;
     u32 QHPhys;
+    UHCIContext *UHCI;
 } UHCIRequest;
 
 typedef struct UHCIContext
@@ -288,6 +290,11 @@ typedef struct
     u8 bInterfaceProtocol;
     u8 iInterface;
 } __attribute__((packed)) USBInterfaceDescriptor;
+
+typedef struct {
+    UHCIQueueHead qh;
+    UHCITransferDescriptor tds[3];
+} USBControlQueue;
 
 UHCIHostController *UHCICreate(u8 Bus, u8 Slot, u8 Func, AllocPool *Pool);
 UHCIResult UHCIInitialize(UHCIContext *ctx);
