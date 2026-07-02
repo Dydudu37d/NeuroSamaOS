@@ -22,6 +22,8 @@
 #include "uhci.h"
 #include "UhciMouse.h"
 #include "UhciKeyboard.h"
+#include "PS2Mouse.h"
+#include "PS2Keyboard.h"
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
@@ -32,6 +34,26 @@
 
 void* GopOut=NULL;
 HDR_PIXEL* GopBack=NULL;
+
+static void *USBMousePollTask(void *Arg) {
+    USBMousePoll((USBMouse*)Arg);
+    return Arg;
+}
+
+static void *USBKeyboardPollTask(void *Arg) {
+    USBKeyboardPoll((USBKeyboard*)Arg);
+    return Arg;
+}
+
+static void *XhciMousePollTask(void *Arg) {
+    MousePoll((MouseDevice*)Arg);
+    return Arg;
+}
+
+static void *XhciKeyboardPollTask(void *Arg) {
+    KeyboardPoll((KeyboardDevice*)Arg);
+    return Arg;
+}
 
 EFI_BOOT_SERVICES *bs=NULL;
 EFI_GOP_MODE GopMode={0};
@@ -594,6 +616,8 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("GTX960 Not Found.\n");
     }
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
+    void *(*GMousePoll)(void *) = NULL;
+    void *(*GKeyboardPoll)(void *) = NULL;
 
     DebugStr("Init UHCI.\n");
     UHCIHostController *hc=NULL;
@@ -654,14 +678,16 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
             DebugStr("Device connected on port 00\r\n");
             UHCIEnablePort(ctx, 0);
             UhciMouse = USBMouseInit(ctx, 0);
-            TaskAdd((Task){.Active=1,.Arg=UhciMouse,.CallFunc=(void*)USBMousePoll,.DelFunc=NULL,.Name="UhciMouse",.NextWaitNs=0,.IntervalNs=1},1);
+            GMousePoll=&USBMousePollTask;
+            TaskAdd((Task){.Active=1,.Arg=UhciMouse,.CallFunc=GMousePoll,.DelFunc=NULL,.Name="UhciMouse",.NextWaitNs=0,.IntervalNs=1,.Target=NULL},1);
         }
 
         if (Port1 != 0xFFFF && (Port1 & UHCI_PORTSC_CCS)) {
             DebugStr("Device connected on port 01\r\n");
             UHCIEnablePort(ctx, 1);
             UhciKeyboard = USBKeyboardInit(ctx, 1);
-            TaskAdd((Task){.Active=1,.Arg=UhciKeyboard,.CallFunc=(void*)USBKeyboardPoll,.DelFunc=NULL,.Name="UhciKeyboard",.NextWaitNs=0,.IntervalNs=1},1);
+            GKeyboardPoll=&USBKeyboardPollTask;
+            TaskAdd((Task){.Active=1,.Arg=UhciKeyboard,.CallFunc=GKeyboardPoll,.DelFunc=NULL,.Name="UhciKeyboard",.NextWaitNs=0,.IntervalNs=1,.Target=NULL},1);
         }
     }
     if (!UhciMouse) DebugStr("No Uhci Mouse Drive.\n");
@@ -680,7 +706,35 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("\r\n");
         Xhci=XhciInit(XhciGetMmioBase(XhciBus,XhciDev,XhciFunc));
     }
-    
+    MouseState PS2MouseState;
+    if (!UhciMouse && Xhci) {
+        MouseDevice* XhciMouse = MouseInit(Xhci);
+        if (XhciMouse) {
+            GMousePoll=&XhciMousePollTask;
+            TaskAdd((Task){.Active=1,.Arg=XhciMouse,.CallFunc=GMousePoll,.DelFunc=NULL,.Name="XhciMouse",.NextWaitNs=0,.IntervalNs=1000000/60,.Target=NULL},1);
+        }
+    }
+    if (!UhciKeyboard && Xhci) {
+        KeyboardDevice* XhciKeyboard = KeyboardInit(Xhci);
+        if (XhciKeyboard) {
+            GKeyboardPoll=&XhciKeyboardPollTask;
+            TaskAdd((Task){.Active=1,.Arg=XhciKeyboard,.CallFunc=GKeyboardPoll,.DelFunc=NULL,.Name="XhciKeyboard",.NextWaitNs=0,.IntervalNs=1000000/60,.Target=NULL},1);
+        }
+    }
+    if (!UhciMouse){
+        DebugStr("Try PS/2 Mouse.\n");
+        PS2MouseInit();
+        PS2MouseSetDPI(0x3);
+        GMousePoll=&PS2GetMouseState;
+        TaskAdd((Task){.Active=1,.Arg=&PS2MouseState,.CallFunc=GMousePoll,.DelFunc=NULL,.Name="PS2Mouse",.NextWaitNs=0,.IntervalNs=1000000000/60,.Target=NULL},1);
+    }
+    char PS2KeyboardGetChar = 0;
+    if (!UhciKeyboard){
+        DebugStr("Try PS/2 Keyboard.\n");
+        PS2KeyboardInit();
+        GKeyboardPoll = &PS2KeyboardPoll;
+        TaskAdd((Task){.Active=1,.Arg=&PS2KeyboardGetChar,.CallFunc=GKeyboardPoll,.DelFunc=NULL,.Name="PS2Keyboard",.NextWaitNs=0,.IntervalNs=1000000000/60,.Target=NULL},1);
+    }
 
     DebugStr("Loop.\n");
     u8 prevModifiers = 0;
@@ -688,7 +742,10 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     while (1){
         GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x7FFF));
         TaskPoll();
-
+        if (PS2KeyboardGetChar!=0){
+            DebugChar(PS2KeyboardGetChar);
+            PS2KeyboardGetChar=0;
+        }
         GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFFFF, 0xFFFF, 0x7FFF));
         GOPFlash();
     }

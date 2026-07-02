@@ -33,6 +33,7 @@ typedef struct KeyboardDevice {
     u8 Buffer[KEY_BUFFER_SIZE];
     u8 ReadPos;
     u8 WritePos;
+    XhciController* Xhci;
 } KeyboardDevice;
 
 KeyboardDevice* KeyboardInit(XhciController* Xhci);

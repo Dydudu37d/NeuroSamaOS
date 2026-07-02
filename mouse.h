@@ -16,6 +16,7 @@ typedef struct MouseDevice {
     s32 Y;
     u8 Buttons;
     s8 Buffer[4];
+    XhciController* Xhci;
 } MouseDevice;
 
 #define USB_DIR_IN             0x80

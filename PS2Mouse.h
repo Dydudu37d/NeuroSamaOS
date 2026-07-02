@@ -8,7 +8,7 @@ typedef struct {
 } MouseState;
 
 void PS2MouseWrite(u8 data);
-u8 PS2MouseRead();
-MouseState PS2GetMouseState();
-void PS2MouseInit();
+u8 PS2MouseRead(void);
+void *PS2GetMouseState(void *Arg);
+void PS2MouseInit(void);
 void PS2MouseSetDPI(u8 DPI);

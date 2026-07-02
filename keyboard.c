@@ -215,6 +215,7 @@ KeyboardDevice* KeyboardInit(XhciController* Xhci) {
             kbd->SlotId = slot;
             kbd->EpIn = ep;
             kbd->MaxPacketSize = maxPkt;
+            kbd->Xhci = Xhci;
 
             KeyboardQueueTransfer(Xhci, kbd);
             return kbd;
@@ -226,12 +227,7 @@ KeyboardDevice* KeyboardInit(XhciController* Xhci) {
 void KeyboardPoll(KeyboardDevice* Kbd) {
     if (!Kbd) return;
 
-    XhciController* xhci = 0;
-    XhciController* base = (XhciController*)0x10000;
-    while (base->MmioBase != 0) {
-        xhci = base;
-        break;
-    }
+    XhciController* xhci = Kbd->Xhci;
     if (!xhci) return;
 
     XhciTrb ev;

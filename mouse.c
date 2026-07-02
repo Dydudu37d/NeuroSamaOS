@@ -221,6 +221,7 @@ MouseDevice* MouseInit(XhciController *Xhci){
                 mouse->EpIn = epIn;
                 mouse->MaxPacketSize = maxPacketSize;
                 mouse->InterfaceNum = ifaceNum;
+                mouse->Xhci = Xhci;
 
                 MouseSetupEndpoint(Xhci, mouse);
                 MousePrepareTransfer(mouse);
@@ -238,12 +239,7 @@ MouseDevice* MouseInit(XhciController *Xhci){
 void MousePoll(MouseDevice* Mouse) {
     if (!Mouse) return;
 
-    XhciController* xhci = 0;
-    XhciController* base = (XhciController*)0x10000;
-    while (base->MmioBase != 0) {
-        xhci = base;
-        break;
-    }
+    XhciController* xhci = Mouse->Xhci;
     if (!xhci) return;
 
     XhciTrb ev;

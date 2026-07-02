@@ -7,6 +7,9 @@ extern AllocPool KernelPool;
 
 static u8 OhciControlTransfer(OhciController* ohci, u8 addr, u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, u8* data)
 {
+    if (!ohci || !ohci->Regs || !ohci->Hcca || !ohci->ControlEd) {
+        return 0;
+    }
     OhciTd* setupTd = (OhciTd*)AlignedAlloc(&KernelPool, sizeof(OhciTd), 16);
     OhciTd* dataTd = (OhciTd*)AlignedAlloc(&KernelPool, sizeof(OhciTd), 16);
     OhciTd* statusTd = (OhciTd*)AlignedAlloc(&KernelPool, sizeof(OhciTd), 16);
@@ -126,6 +129,14 @@ OhciController* OhciInit(u64 MmioBase)
         return NULL;
     }
 
+    if (MmioBase == 0) {
+        return NULL;
+    }
+
+    if ((MmioBase & 0xFFFFFFFF00000000ULL) != 0) {
+        return NULL;
+    }
+
     OhciController* ohci = (OhciController*)AlignedAlloc(&KernelPool, sizeof(OhciController), 64);
     MemSet(ohci, 0, sizeof(OhciController));
 
@@ -140,7 +151,7 @@ OhciController* OhciInit(u64 MmioBase)
     }
 
     ohci->Hcca = (OhciHcca*)AlignedAlloc(&KernelPool, sizeof(OhciHcca), 256);
-    if ((u64)ohci->Hcca & 0xFFFFFFFF00000000ULL) {
+    if (!ohci->Hcca || ((u64)ohci->Hcca & 0xFFFFFFFF00000000ULL)) {
         return NULL;
     }
     MemSet(ohci->Hcca, 0, sizeof(OhciHcca));
@@ -148,6 +159,9 @@ OhciController* OhciInit(u64 MmioBase)
 
     ohci->ControlEd = (OhciEd*)AlignedAlloc(&KernelPool, sizeof(OhciEd), 16);
     ohci->BulkEd = (OhciEd*)AlignedAlloc(&KernelPool, sizeof(OhciEd), 16);
+    if (!ohci->ControlEd || !ohci->BulkEd) {
+        return NULL;
+    }
     MemSet(ohci->ControlEd, 0, sizeof(OhciEd));
     MemSet(ohci->BulkEd, 0, sizeof(OhciEd));
 
@@ -226,6 +240,7 @@ OhciController* OhciInit(u64 MmioBase)
 
 void OhciPollEvents(OhciController* ohci)
 {
+    if (!ohci || !ohci->Regs || !ohci->Hcca || !ohci->KbdEd || !ohci->KbdTd || !ohci->KbdBuffer) return;
     if (!ohci->HaveKeyboard) return;
 
     if (ohci->Hcca->HccaDoneHead != 0) {
@@ -266,6 +281,7 @@ void OhciPollEvents(OhciController* ohci)
 
 u8 OhciGetChar(OhciController* ohci)
 {
+    if (!ohci) return 0;
     if (!ohci->HaveKeyboard) return 0;
     u8 c = ohci->LastChar;
     ohci->LastChar = 0;

@@ -1,4 +1,11 @@
 CC := clang
+DISK_DIR := disk
+EFI_BOOT_DIR := $(DISK_DIR)/EFI/BOOT
+
+.PHONY: all clean clear run-whpx debug-whpx run-kvm debug-kvm run-tcg debug-tcg
+
+all: boot.efi
+
 CCArg = --target=x86_64-unknown-windows-gnu \
         -ffreestanding \
         -nostdlib \
@@ -39,8 +46,8 @@ boot.efi: $(O_OBJS)
 	llvm-objcopy --subsystem=efi-app boot.exe $@
 
 run-whpx: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
 		-drive format=raw,file=fat:rw:disk \
@@ -50,15 +57,15 @@ run-whpx: boot.efi
 		-accel whpx \
 		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci1 \
-		-device usb-kbd,bus=uhci1.0,port=1 \
-		-device usb-mouse,bus=uhci1.0,port=2 \
-	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
 
 
 debug-whpx: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
 		-drive format=raw,file=fat:rw:disk \
@@ -68,14 +75,14 @@ debug-whpx: boot.efi
 		-accel whpx \
 		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci1 \
-		-device usb-kbd,bus=uhci1.0,port=1 \
-		-device usb-mouse,bus=uhci1.0,port=2 \
-		-s -S -no-reboot -no-shutdown
+		-s -S -no-reboot -no-shutdown \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
 
 run-kvm: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
 		-drive format=raw,file=fat:rw:disk \
@@ -88,12 +95,15 @@ run-kvm: boot.efi
 		-device piix3-usb-uhci,id=uhci1 \
 		-device usb-kbd,bus=uhci1.0,port=1 \
 		-device usb-mouse,bus=uhci1.0,port=2 \
-		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
 
 
 debug-kvm: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
 		-drive format=raw,file=fat:rw:./disk \
@@ -106,11 +116,14 @@ debug-kvm: boot.efi
 		-device piix3-usb-uhci,id=uhci1 \
 		-device usb-kbd,bus=uhci1.0,port=1 \
 		-device usb-mouse,bus=uhci1.0,port=2 \
-		-s -S -no-reboot -no-shutdown
+		-s -S -no-reboot -no-shutdown \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
 
 run-tcg: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
 		-drive format=raw,file=fat:rw:disk \
@@ -123,12 +136,15 @@ run-tcg: boot.efi
 		-device piix3-usb-uhci,id=uhci1 \
 		-device usb-kbd,bus=uhci1.0,port=1 \
 		-device usb-mouse,bus=uhci1.0,port=2 \
-		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown
+		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
 
 
 debug-tcg: boot.efi
-	mkdir -p disk/EFI/BOOT/
-	cp boot.efi disk/EFI/BOOT/BOOTX64.EFI
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
 	qemu-system-x86_64 \
 		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
 		-drive format=raw,file=fat:rw:./disk \
@@ -141,7 +157,12 @@ debug-tcg: boot.efi
 		-device piix3-usb-uhci,id=uhci1 \
 		-device usb-kbd,bus=uhci1.0,port=1 \
 		-device usb-mouse,bus=uhci1.0,port=2 \
-		-s -S -no-reboot -no-shutdown
+		-s -S -no-reboot -no-shutdown \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
 
-clear:
-	rm -rf *.o boot.efi disk/ boot.dll
+clean:
+	rm -f *.o boot.exe boot.efi boot.dll qemu.log
+
+clear: clean
