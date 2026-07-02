@@ -148,7 +148,7 @@ decode_modrm:
 
 void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *rflags) {
     if (InExceptionHandler) {
-        outb_str("\nRECURSIVE EXCEPTION HALT\n");
+        outb_str("\nRECURSIVE EXCEPTION HALT,I am Sorry\n");
         while(1) { __asm__ volatile("cli; hlt"); }
     }
     InExceptionHandler = 1;
@@ -174,7 +174,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
     outb_str("\n");
 
     if (vector == 8) {
-        outb_str("DF HALT\n");
+        outb_str("DF HALT,I am Sorry\n");
         while(1) { __asm__ volatile("cli; hlt"); }
     }
 
@@ -182,7 +182,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
         u8 len = get_instruction_length(*rip);
         *rip += len;
     } else {
-        outb_str("NULL RIP HALT\n");
+        outb_str("NULL RIP HALT,I am Sorry\n");
         while(1) { __asm__ volatile("cli; hlt"); }
     }
     

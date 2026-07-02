@@ -138,7 +138,7 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
     u64 max_1gb_pages = (MaxPhysMem + 1073741824ULL - 1) / 1073741824ULL;
     if (max_1gb_pages > 512) max_1gb_pages = 512;
 
-    for (u64 i = 0; i <= max_1gb_pages; i++) {
+    for (u64 i = 0; i < max_1gb_pages; i++) {
         u64 phys = i * 1073741824ULL;
         if (i == 0) continue;
 
@@ -362,6 +362,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     SIMDInit();
     FPUInit();
     DebugInit();
+    InitClock();
     EFI_LOADED_IMAGE_PROTOCOL *LoadedImage = NULL;
     
     EFI_STATUS status = sys->BootServices->HandleProtocol(
@@ -387,7 +388,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     bs->LocateProtocol(&GopGuid, NULL, (void **)&Gop);
 
     EFI_STATUS Status = Gop->SetMode(Gop, GetGopByWH(1280,720));
-    if (status != EFI_SUCCESS)
+    if (Status != EFI_SUCCESS)
     {
         DebugStr("\r\n[NeuroSamaOS] GOP Init Faild.\n");
         while(1) __asm__ volatile("cli\n\t hlt");
@@ -463,12 +464,26 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         DebugStr("BuildDynamicPageTable failed!\n");
         while(1) __asm__ volatile("cli\n\t hlt");
     }
+    u8* KernelStack = NULL;
+    EFI_PHYSICAL_ADDRESS stack_alloc_addr = MaxAvailableAddress; 
+    status = bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, EFI_SIZE_TO_PAGES(128 * 1024 * 1024), &stack_alloc_addr);
+    if (status != EFI_SUCCESS) {
+        DebugStr("Allocate KernelStack failed!\n");
+        while(1) __asm__ volatile("cli\n\t hlt");
+    }
+    KernelStack = (u8*)stack_alloc_addr;
     DebugStr("ExitBootServices.\n");
     DebugStr("ExitBootServices.\n");
     ExitBootServices_Safe(image);
     __asm__ volatile("cli\n\t");
     DebugStr("MemFlash.\n");
     MemFullFlash();
+    u64 StackTop = (u64)KernelStack + 128 * 1024 * 1024;
+    __asm__ volatile(
+        "movq %0, %%rsp\n\t"
+        "xorq %%rbp, %%rbp\n\t"
+        :: "r"(StackTop) : "memory"
+    );
     DebugStr("Mov pml4 to cr3.\n");
     LoadDynamicPageTable(pml5);
     DebugStr("InitPool.\n");
@@ -478,20 +493,15 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     }
     InitPool(PoolSize);
     DebugStr("AllocStack.\n");
-    u8* KernelStack = AlignedAlloc(&KernelPool, 64*1024*1024,16);
     GopBack = (HDR_PIXEL*)(u64)AlignedAlloc(&KernelPool, GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL), 64);
 
     LoadGDT();
     InitIDT();
-
-    u64 StackTop = (u64)KernelStack + 64*1024*1024;
-    u64 StackBottom = (u64)KernelStack;
+    
     __asm__ volatile(
-        "movq %0, %%rsp\n\t"
-        "movq %1, %%rbp\n\t"
         "call kernel_main\n\t"
         :
-        : "r"(StackTop), "r"(StackBottom)
+        :
         : "memory"
     );
     return 0;
@@ -590,10 +600,10 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     UHCIContext *ctx=NULL;
     USBMouse* UhciMouse=NULL;
     USBKeyboard* UhciKeyboard=NULL;
-    u8 Bus, Dev, Func;
+    u8 Bus = 0xFF, Dev = 0xFF, Func = 0xFF;
     PCIFindDeviceByClass(UHCI_CLASS_CODE, UHCI_SUBCLASS, UHCI_INTERFACE, &Bus, &Dev, &Func);
-    _Bool UhciFound = Bus != 0xFF;
-    if (Bus != 0xFF) {
+    _Bool UhciFound = (Dev != 0xFF);
+    if (Dev != 0xFF) {
         DebugStr("Found UHCI: Bus=");
         DebugU64(Bus);
         DebugStr(" Slot=");
@@ -642,7 +652,6 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
 
         if (Port0 != 0xFFFF && (Port0 & UHCI_PORTSC_CCS)) {
             DebugStr("Device connected on port 00\r\n");
-            UHCIResetPort(ctx, 0);
             UHCIEnablePort(ctx, 0);
             UhciMouse = USBMouseInit(ctx, 0);
             TaskAdd((Task){.Active=1,.Arg=UhciMouse,.CallFunc=(void*)USBMousePoll,.DelFunc=NULL,.Name="UhciMouse",.NextWaitNs=0,.IntervalNs=1},1);
@@ -650,7 +659,6 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
 
         if (Port1 != 0xFFFF && (Port1 & UHCI_PORTSC_CCS)) {
             DebugStr("Device connected on port 01\r\n");
-            UHCIResetPort(ctx, 1);
             UHCIEnablePort(ctx, 1);
             UhciKeyboard = USBKeyboardInit(ctx, 1);
             TaskAdd((Task){.Active=1,.Arg=UhciKeyboard,.CallFunc=(void*)USBKeyboardPoll,.DelFunc=NULL,.Name="UhciKeyboard",.NextWaitNs=0,.IntervalNs=1},1);
@@ -658,36 +666,30 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     }
     if (!UhciMouse) DebugStr("No Uhci Mouse Drive.\n");
     if (!UhciKeyboard) DebugStr("No Uhci Keyboard Drive.\n");
+    u8 XhciBus = 0xFF, XhciDev = 0xFF, XhciFunc = 0xFF;
+    PCIFindDeviceByClass(0x0C, 0x03, 0x30, &XhciBus, &XhciDev, &XhciFunc);
+    _Bool XhciFound = (XhciDev != 0xFF);
+    XhciController* Xhci=NULL;
+    if (XhciDev != 0xFF) {
+        DebugStr("Found XHCI: Bus=");
+        DebugU64(XhciBus);
+        DebugStr(" Slot=");
+        DebugU64(XhciDev);
+        DebugStr(" Func=");
+        DebugU64(XhciFunc);
+        DebugStr("\r\n");
+        Xhci=XhciInit(XhciGetMmioBase(XhciBus,XhciDev,XhciFunc));
+    }
+    
 
     DebugStr("Loop.\n");
     u8 prevModifiers = 0;
     u8 prevKeys[6] = {0};
     while (1){
-        GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x0000));
+        GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x7FFF));
         TaskPoll();
-        if (UhciKeyboard){
-            u8 modifiers = USBKeyboardGetModifiers(UhciKeyboard);
-            u8 count = USBKeyboardGetKeyCount(UhciKeyboard);
-            
-            u8 changed = 0;
-            if (modifiers != prevModifiers) changed = 1;
-            for (u8 j = 0; j < 6; j++) {
-                if (USBKeyboardGetKey(UhciKeyboard, j) != prevKeys[j]) {
-                    changed = 1;
-                    break;
-                }
-            }
-            
-            if (changed) {
-                USBKeyboardPrintKeys(UhciKeyboard);
-                prevModifiers = modifiers;
-                for (u8 j = 0; j < 6; j++) {
-                    prevKeys[j] = USBKeyboardGetKey(UhciKeyboard, j);
-                }
-            }
-        }
 
-        GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFF00, 0xFF00, 0x7FFF));
+        GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFFFF, 0xFFFF, 0x7FFF));
         GOPFlash();
     }
 }

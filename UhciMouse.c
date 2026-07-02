@@ -6,18 +6,16 @@
 static UHCIResult WaitForRequestComplete(UHCIRequest *req, u32 timeout_us)
 {
     u32 elapsed = 0;
-    
     while (!req->Completed) {
         UHCIPoll(req->UHCI);
-        for (u32 i = 0; i < 100; i++) {
+        for (u32 i = 0; i < 10; i++) {
             __asm__ volatile ("pause");
         }
-        elapsed += 100;
+        elapsed += 10;
         if (elapsed > timeout_us) {
             return UHCI_ERROR_TIMEOUT;
         }
     }
-    
     return req->Result;
 }
 
@@ -43,6 +41,7 @@ static UHCIResult ExecuteControlTransfer(UHCIContext *ctx,
     USBControlQueue *q;
     UHCIResult result;
     u16 maxPacket = 8;
+    u16 FrameIdx;
     
     req = UHCICreateRequest(ctx);
     if (!req) return UHCI_ERROR_NO_MEMORY;
@@ -60,31 +59,40 @@ static UHCIResult ExecuteControlTransfer(UHCIContext *ctx,
     u32 devAddrField = (devAddr << UHCI_TD_TOKEN_DEVADDR_SHIFT) & UHCI_TD_TOKEN_DEVADDR_MASK;
     u32 endpField = (endpoint << UHCI_TD_TOKEN_ENDPT_SHIFT) & UHCI_TD_TOKEN_ENDPT_MASK;
     
-    q->tds[0].Token = setupPid | devAddrField | endpField | (setupLen & 0x7FF);
-    q->tds[0].ControlStatus = UHCI_TD_ACTIVE | (setupLen & UHCI_TD_MAXLEN_MASK);
+    q->tds[0].Token = setupPid | devAddrField | endpField | (((setupLen - 1) & 0x7FF) << 21);
+    q->tds[0].ControlStatus = UHCI_TD_ACTIVE | (3 << 27);
     q->tds[0].BufferPointer = (u32)(u64)setupPacket;
-    q->tds[0].LinkPointer = (u32)(u64)&q->tds[1];
+    q->tds[0].LinkPointer = (u32)(u64)&q->tds[1] | 0x04;
     
-    if (dir) {
-        q->tds[1].Token = inPid | devAddrField | endpField | (dataLen & 0x7FF);
+    if (dataLen > 0) {
+        if (dir) {
+            q->tds[1].Token = inPid | devAddrField | endpField | (((dataLen - 1) & 0x7FF) << 21) | (1 << 19);
+        } else {
+            q->tds[1].Token = outPid | devAddrField | endpField | (((dataLen - 1) & 0x7FF) << 21) | (1 << 19);
+        }
+        q->tds[1].ControlStatus = UHCI_TD_ACTIVE | (3 << 27);
+        q->tds[1].BufferPointer = (u32)(u64)data;
+        q->tds[1].LinkPointer = (u32)(u64)&q->tds[2] | 0x04;
     } else {
-        q->tds[1].Token = outPid | devAddrField | endpField | (dataLen & 0x7FF);
+        q->tds[0].LinkPointer = (u32)(u64)&q->tds[2] | 0x04;
     }
-    q->tds[1].ControlStatus = UHCI_TD_ACTIVE | (dataLen & UHCI_TD_MAXLEN_MASK);
-    q->tds[1].BufferPointer = (u32)(u64)data;
-    q->tds[1].LinkPointer = (u32)(u64)&q->tds[2];
     
-    if (dir) {
-        q->tds[2].Token = outPid | devAddrField | endpField;
+    u32 maxLenStatus = 0x7FF << 21;
+    if (dir || dataLen == 0) {
+        q->tds[2].Token = outPid | devAddrField | endpField | maxLenStatus | (1 << 19);
     } else {
-        q->tds[2].Token = inPid | devAddrField | endpField;
+        q->tds[2].Token = inPid | devAddrField | endpField | maxLenStatus | (1 << 19);
     }
-    q->tds[2].ControlStatus = UHCI_TD_ACTIVE | UHCI_TD_IOC;
+    q->tds[2].ControlStatus = UHCI_TD_ACTIVE | UHCI_TD_IOC | (3 << 27);
     q->tds[2].BufferPointer = 0;
     q->tds[2].LinkPointer = UHCI_FRAME_TERMINATE;
     
-    q->qh.VerticalLink = (u32)(u64)&q->tds[0] | 0x02;
-    q->qh.HorizontalLink = UHCI_FRAME_TERMINATE;
+    q->qh.VerticalLink = (u32)(u64)&q->tds[0] | 0x00;
+    
+    FrameIdx = UHCIGetFrameNumber(ctx) & (UHCI_FRAME_LIST_SIZE - 1);
+    u32 oldFrameHead = ctx->FrameList[FrameIdx].Pointer;
+    q->qh.HorizontalLink = oldFrameHead;
+    ctx->FrameList[FrameIdx].Pointer = (u32)(u64)&q->qh | 0x02;
     
     req->DeviceAddress = devAddr;
     req->Endpoint = endpoint;
@@ -98,14 +106,24 @@ static UHCIResult ExecuteControlTransfer(UHCIContext *ctx,
     req->QH = &q->qh;
     req->UHCI = ctx;
     
-    result = UHCISubmitRequest(ctx, req);
-    if (result != UHCI_OK) {
-        Free(ctx->MemoryPool, q);
-        Free(ctx->MemoryPool, req);
-        return result;
-    }
+    req->Next = ctx->PendingRequests;
+    ctx->PendingRequests = req;
     
     result = WaitForRequestComplete(req, USB_CTRL_TIMEOUT);
+    
+    UHCIRequest *prev = 0;
+    UHCIRequest *cur = ctx->PendingRequests;
+    while (cur) {
+        if (cur == req) {
+            if (prev) prev->Next = cur->Next;
+            else ctx->PendingRequests = cur->Next;
+            break;
+        }
+        prev = cur;
+        cur = cur->Next;
+    }
+    
+    ctx->FrameList[FrameIdx].Pointer = oldFrameHead;
     
     Free(ctx->MemoryPool, q);
     Free(ctx->MemoryPool, req);
@@ -121,10 +139,8 @@ static UHCIResult GetDeviceDescriptor(UHCIContext *ctx, u8 devAddr,
     UHCIResult result;
     
     BuildSetupPacket(setup, 0x80, USB_REQ_GET_DESCRIPTOR, 0x0100, 0x0000, 0x12);
-    
     result = ExecuteControlTransfer(ctx, devAddr, 0, setup, 8, data, 18, 1);
     if (result != UHCI_OK) return result;
-    
     MemCopy(desc, data, sizeof(USBDeviceDescriptor));
     return UHCI_OK;
 }
@@ -132,9 +148,7 @@ static UHCIResult GetDeviceDescriptor(UHCIContext *ctx, u8 devAddr,
 static UHCIResult SetDeviceAddress(UHCIContext *ctx, u8 devAddr)
 {
     u8 setup[8];
-    
     BuildSetupPacket(setup, 0x00, 0x05, devAddr, 0x0000, 0x0000);
-    
     return ExecuteControlTransfer(ctx, 0, 0, setup, 8, NULL, 0, 0);
 }
 
@@ -143,36 +157,28 @@ static UHCIResult GetConfigDescriptor(UHCIContext *ctx, u8 devAddr,
 {
     u8 setup[8];
     u8 data[9];
-    
     BuildSetupPacket(setup, 0x80, USB_REQ_GET_DESCRIPTOR, 0x0200, 0x0000, 0x09);
-    
     return ExecuteControlTransfer(ctx, devAddr, 0, setup, 8, data, 9, 1);
 }
 
 static UHCIResult SetConfiguration(UHCIContext *ctx, u8 devAddr, u8 configValue)
 {
     u8 setup[8];
-    
     BuildSetupPacket(setup, 0x00, USB_REQ_SET_CONFIG, configValue, 0x0000, 0x0000);
-    
     return ExecuteControlTransfer(ctx, devAddr, 0, setup, 8, NULL, 0, 0);
 }
 
 static UHCIResult SetIdle(UHCIContext *ctx, u8 devAddr, u8 duration)
 {
     u8 setup[8];
-    
     BuildSetupPacket(setup, 0x21, USB_REQ_SET_IDLE, (duration << 8), 0x0000, 0x0000);
-    
     return ExecuteControlTransfer(ctx, devAddr, 0, setup, 8, NULL, 0, 0);
 }
 
 static UHCIResult SetProtocol(UHCIContext *ctx, u8 devAddr, u8 protocol)
 {
     u8 setup[8];
-    
     BuildSetupPacket(setup, 0x21, USB_REQ_SET_PROTOCOL, protocol, 0x0000, 0x0000);
-    
     return ExecuteControlTransfer(ctx, devAddr, 0, setup, 8, NULL, 0, 0);
 }
 
@@ -194,8 +200,8 @@ static UHCIResult CreateInterruptIN(UHCIContext *ctx, u8 devAddr, u8 endpoint,
     td->Token = (UHCI_TD_PID_IN << 24);
     td->Token |= (devAddr << UHCI_TD_TOKEN_DEVADDR_SHIFT) & UHCI_TD_TOKEN_DEVADDR_MASK;
     td->Token |= (endpoint << UHCI_TD_TOKEN_ENDPT_SHIFT) & UHCI_TD_TOKEN_ENDPT_MASK;
-    td->Token |= (len & 0x7FF);
-    td->ControlStatus = UHCI_TD_ACTIVE | UHCI_TD_IOC | (len & UHCI_TD_MAXLEN_MASK);
+    td->Token |= (((len - 1) & 0x7FF) << 21);
+    td->ControlStatus = UHCI_TD_ACTIVE | UHCI_TD_IOC | (3 << 27);
     td->BufferPointer = (u32)(u64)buffer;
     td->LinkPointer = UHCI_FRAME_TERMINATE;
     
@@ -212,13 +218,10 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
     USBConfigDescriptor configDesc;
     u8 setup[8];
     UHCIResult result;
-    u16 currentFrame;
-    u32 frameSlot;
     UHCIFrameListEntry *frameList;
     UHCITransferDescriptor *td;
     u32 tdPhys;
-    u8 *ptr;
-    u8 *end;
+    u8 *ptr, *end;
     u8 foundEndpoint;
     
     if (!uhci || !uhci->MemoryPool) return NULL;
@@ -228,18 +231,18 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
     MemSet(mouse, 0, sizeof(USBMouse));
     mouse->UHCI = uhci;
     
-    result = UHCIResetPort(uhci, port);
-    if (result != UHCI_OK) {
-        Free(uhci->MemoryPool, mouse);
-        return NULL;
-    }
-    
-    SystemBusySleepMs(100);
+    UHCIResetPort(uhci, port);
+    UHCIClearPortChange(uhci, port);
+    SystemBusySleepMs(200);
     
     result = GetDeviceDescriptor(uhci, 0, &devDesc);
     if (result != UHCI_OK) {
-        Free(uhci->MemoryPool, mouse);
-        return NULL;
+        SystemBusySleepMs(100);
+        result = GetDeviceDescriptor(uhci, 0, &devDesc);
+        if (result != UHCI_OK) {
+            Free(uhci->MemoryPool, mouse);
+            return NULL;
+        }
     }
     
     if (devDesc.bDeviceClass != 0x00 && devDesc.bDeviceClass != 0x03) {
@@ -248,13 +251,12 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
     }
     
     mouse->DeviceAddress = 1;
-    
     result = SetDeviceAddress(uhci, mouse->DeviceAddress);
     if (result != UHCI_OK) {
         Free(uhci->MemoryPool, mouse);
         return NULL;
     }
-    SystemBusySleepMs(10);
+    SystemBusySleepMs(50);
     
     result = GetConfigDescriptor(uhci, mouse->DeviceAddress, &configDesc);
     if (result != UHCI_OK) {
@@ -262,13 +264,12 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
         return NULL;
     }
     
-    result = SetConfiguration(uhci, mouse->DeviceAddress, 
-                               configDesc.bConfigurationValue);
+    result = SetConfiguration(uhci, mouse->DeviceAddress, configDesc.bConfigurationValue);
     if (result != UHCI_OK) {
         Free(uhci->MemoryPool, mouse);
         return NULL;
     }
-    SystemBusySleepMs(10);
+    SystemBusySleepMs(50);
     
     result = SetProtocol(uhci, mouse->DeviceAddress, USB_MOUSE_PROTOCOL_BOOT);
     if (result != UHCI_OK) {
@@ -279,9 +280,7 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
         }
     }
     
-    result = SetIdle(uhci, mouse->DeviceAddress, 0);
-    if (result != UHCI_OK) {
-    }
+    SetIdle(uhci, mouse->DeviceAddress, 0);
     
     {
         u8 configData[256];
@@ -293,15 +292,12 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
             Free(uhci->MemoryPool, mouse);
             return NULL;
         }
-        
         ptr = configData;
         end = ptr + ((USBConfigDescriptor*)ptr)->wTotalLength;
         foundEndpoint = 0;
-        
         while (ptr < end) {
             u8 len = ptr[0];
             u8 type = ptr[1];
-            
             if (type == 0x05) {
                 USBEndpointDescriptor *ep = (USBEndpointDescriptor*)ptr;
                 if ((ep->bEndpointAddress & 0x80) && 
@@ -316,7 +312,6 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
             ptr += len;
         }
     }
-    
     if (!foundEndpoint) {
         Free(uhci->MemoryPool, mouse);
         return NULL;
@@ -349,15 +344,13 @@ USBMouse *USBMouseInit(UHCIContext *uhci, u8 port)
     mouse->PollRequest->UHCI = uhci;
     mouse->PollRequest->TDCount = 1;
     
-    currentFrame = UHCIGetFrameNumber(uhci);
-    frameSlot = currentFrame % UHCI_FRAME_LIST_SIZE;
-    
     frameList = (UHCIFrameListEntry*)uhci->FrameListVirt;
-    frameList[frameSlot].Pointer = tdPhys | 0x02;
+    for (int i = 0; i < UHCI_FRAME_LIST_SIZE; i++) {
+        frameList[i].Pointer = tdPhys | 0x00;
+    }
     
     mouse->Polling = 1;
     mouse->Configured = 1;
-    
     return mouse;
 }
 
@@ -365,63 +358,33 @@ void USBMousePoll(USBMouse *mouse)
 {
     UHCITransferDescriptor *td;
     u8 *data;
-    
     if (!mouse || !mouse->Polling) return;
-    
     td = mouse->PollRequest->TD;
-    
     if (!(td->ControlStatus & UHCI_TD_ACTIVE)) {
         if (td->ControlStatus & UHCI_TD_STALL) {
-            td->ControlStatus = UHCI_TD_ACTIVE | USB_MOUSE_REPORT_SIZE;
+            td->ControlStatus = UHCI_TD_ACTIVE | (3 << 27);
             return;
         }
-        
         data = mouse->ReportBuffer;
-        
         mouse->LastReport.Buttons = data[0] & 0x07;
         mouse->LastReport.X = (s8)data[1];
         mouse->LastReport.Y = (s8)data[2];
         mouse->LastReport.Wheel = (s8)data[3];
-        
-        td->ControlStatus = UHCI_TD_ACTIVE | UHCI_TD_IOC | USB_MOUSE_REPORT_SIZE;
+        td->Token ^= (1 << 19);
+        td->ControlStatus = UHCI_TD_ACTIVE | UHCI_TD_IOC | (3 << 27);
     }
 }
 
-u8 USBMouseGetButtons(USBMouse *mouse)
-{
-    if (!mouse) return 0;
-    return mouse->LastReport.Buttons;
-}
-
-s8 USBMouseGetX(USBMouse *mouse)
-{
-    if (!mouse) return 0;
-    return mouse->LastReport.X;
-}
-
-s8 USBMouseGetY(USBMouse *mouse)
-{
-    if (!mouse) return 0;
-    return mouse->LastReport.Y;
-}
-
-s8 USBMouseGetWheel(USBMouse *mouse)
-{
-    if (!mouse) return 0;
-    return mouse->LastReport.Wheel;
-}
+u8 USBMouseGetButtons(USBMouse *mouse) { if (!mouse) return 0; return mouse->LastReport.Buttons; }
+s8 USBMouseGetX(USBMouse *mouse) { if (!mouse) return 0; return mouse->LastReport.X; }
+s8 USBMouseGetY(USBMouse *mouse) { if (!mouse) return 0; return mouse->LastReport.Y; }
+s8 USBMouseGetWheel(USBMouse *mouse) { if (!mouse) return 0; return mouse->LastReport.Wheel; }
 
 void USBMouseTest(UHCIContext *uhci)
 {
-    USBMouse *mouse;
-    int i;
-    
-    mouse = USBMouseInit(uhci, 0);
-    if (!mouse) {
-        return;
-    }
-    
-    for (i = 0; i < 1000; i++) {
+    USBMouse *mouse = USBMouseInit(uhci, 0);
+    if (!mouse) return;
+    for (int i = 0; i < 1000; i++) {
         USBMousePoll(mouse);
         SystemBusySleepMs(10);
     }

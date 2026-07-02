@@ -151,6 +151,11 @@ UHCIResult UHCIInitialize(UHCIContext *Ctx)
         }
     }
 
+    if ((u64)Ctx->FrameList > 0xFFFFFFFFULL) {
+        DebugStr("UHCI FrameList above 4GB!\n");
+        return UHCI_ERROR_NO_MEMORY;
+    }
+
     HC->FrameListPhys = (u32)(u64)Ctx->FrameList;
     HC->FrameListVirt = Ctx->FrameList;
 
@@ -313,7 +318,7 @@ UHCIResult UHCIResetPort(UHCIContext *Ctx, u8 Port)
         return UHCI_ERROR_GENERAL;
     }
 
-    PortSc |= UHCI_PORTSC_PR;
+    PortSc |= 0x0200;
     UHCIOutW(HC, Offset, PortSc);
 
     u64 Start = SystemGetTimeMillis();
@@ -324,7 +329,7 @@ UHCIResult UHCIResetPort(UHCIContext *Ctx, u8 Port)
         }
         
         u16 Current = UHCIInW(HC, Offset);
-        if (!(Current & UHCI_PORTSC_PR)) {
+        if (!(Current & 0x0200)) {
             ResetComplete = 1;
             break;
         }
@@ -333,9 +338,11 @@ UHCIResult UHCIResetPort(UHCIContext *Ctx, u8 Port)
 
     if (!ResetComplete) {
         PortSc = UHCIInW(HC, Offset);
-        PortSc &= ~UHCI_PORTSC_PR;
+        PortSc &= ~0x0200;
         UHCIOutW(HC, Offset, PortSc);
     }
+
+    UHCIWait(20000);
 
     Start = SystemGetTimeMillis();
     while (1) {
@@ -360,7 +367,12 @@ UHCIResult UHCIResetPort(UHCIContext *Ctx, u8 Port)
         return UHCI_ERROR_GENERAL;
     }
 
+    UHCIWait(50000);
+
+    PortSc = UHCIInW(HC, Offset);
     UHCIOutW(HC, Offset, PortSc | UHCI_PORTSC_PE);
+
+    UHCIWait(10000);
 
     return UHCI_OK;
 }
@@ -419,13 +431,13 @@ UHCIResult UHCIResumePort(UHCIContext *Ctx, u8 Port)
     u16 Offset = UHCI_PORTSC1_OFFSET + (Port * 2);
 
     u16 PortSc = UHCIInW(HC, Offset);
-    PortSc |= UHCI_PORTSC_RD;
+    PortSc |= 0x0040;
     UHCIOutW(HC, Offset, PortSc);
 
     UHCIWait(20000);
 
     PortSc = UHCIInW(HC, Offset);
-    PortSc &= ~UHCI_PORTSC_RD;
+    PortSc &= ~0x0040;
     PortSc &= ~UHCI_PORTSC_SUSP;
     UHCIOutW(HC, Offset, PortSc);
 
@@ -499,7 +511,13 @@ UHCIRequest *UHCICreateRequest(UHCIContext *Ctx)
     }
     MemSet(Req->QH, 0, sizeof(UHCIQueueHead));
 
+    if ((u64)Req->TD > 0xFFFFFFFFULL || (u64)Req->TDList > 0xFFFFFFFFULL || (u64)Req->QH > 0xFFFFFFFFULL) {
+        DebugStr("UHCI Request structure allocated above 4GB!\n");
+    }
+
     Req->UHCI = Ctx;
+    Req->TDCount = 1;
+    Req->ErrorCount = 3;
 
     return Req;
 }
@@ -524,7 +542,7 @@ static void UHCISetupTD(UHCIRequest *Req)
     TD->Token = (Req->DeviceAddress << 8) | 
                 (Req->Endpoint << 15) | 
                 (Pid << 24) | 
-                (Req->DataLength & 0x7FF);
+                ((Req->DataLength - 1) & 0x7FF);
     TD->BufferPointer = (u32)(u64)Req->DataBuffer;
     TD->LinkPointer = UHCI_FRAME_TERMINATE;
 }
@@ -534,25 +552,59 @@ UHCIResult UHCISubmitRequest(UHCIContext *Ctx, UHCIRequest *Req)
     if (!Ctx || !Req || !Ctx->HC)
         return UHCI_ERROR_GENERAL;
 
+    if (!Ctx->HC->Running) {
+        return UHCI_ERROR_GENERAL;
+    }
+
+    if ((u64)Req->DataBuffer > 0xFFFFFFFFULL) {
+        return UHCI_ERROR_GENERAL;
+    }
+
     Req->Active = 1;
     Req->Completed = 0;
     Req->Success = 0;
     Req->Stalled = 0;
     Req->Result = UHCI_OK;
-    Req->ErrorCount = 0;
+    Req->ErrorCount = 3;
 
     if (!Req->UHCI) {
         Req->UHCI = Ctx;
     }
 
-    if (Req->TDCount > 1) {
+    if (Req->Type == UHCI_TRANSFER_CONTROL) {
+        Req->TDCount = 3;
+        
+        UHCITransferDescriptor *setupTD = &Req->TDList[0];
+        UHCITransferDescriptor *dataTD = &Req->TDList[1];
+        UHCITransferDescriptor *statusTD = &Req->TDList[2];
+
+        setupTD->LinkPointer = (u32)(u64)dataTD | 0x04;
+        setupTD->ControlStatus = UHCI_TD_ACTIVE | (3 << 27);
+        setupTD->Token = (Req->DeviceAddress << 8) | (Req->Endpoint << 15) | (UHCI_TD_PID_SETUP << 24) | ((8 - 1) << 19);
+        setupTD->BufferPointer = (u32)(u64)Req->DataBuffer; 
+
+        dataTD->LinkPointer = (u32)(u64)statusTD | 0x04;
+        dataTD->ControlStatus = UHCI_TD_ACTIVE | (3 << 27);
+        u8 dataPid = (Req->Direction == UHCI_TRANSFER_IN) ? UHCI_TD_PID_IN : UHCI_TD_PID_OUT;
+        dataTD->Token = (Req->DeviceAddress << 8) | (Req->Endpoint << 15) | (dataPid << 24) | (((Req->DataLength) - 1) << 19) | (1 << 19);
+        dataTD->BufferPointer = (u32)(u64)(Req->DataBuffer + 8); 
+
+        statusTD->LinkPointer = UHCI_FRAME_TERMINATE;
+        statusTD->ControlStatus = UHCI_TD_ACTIVE | (3 << 27);
+        u8 statusPid = (Req->Direction == UHCI_TRANSFER_IN) ? UHCI_TD_PID_OUT : UHCI_TD_PID_IN;
+        statusTD->Token = (Req->DeviceAddress << 8) | (Req->Endpoint << 15) | (statusPid << 24) | (0x7FF << 19) | (1 << 19);
+        statusTD->BufferPointer = 0;
+
+        Req->QH->VerticalLink = (u32)(u64)setupTD | 0x00;
+    }
+    else if (Req->TDCount > 1) {
         if (Req->TDList) {
             Req->TDList[Req->TDCount - 1].LinkPointer = UHCI_FRAME_TERMINATE;
         }
-        Req->QH->VerticalLink = (u32)(u64)Req->TDList | 0x02;
+        Req->QH->VerticalLink = (u32)(u64)Req->TDList | 0x00;
     } else if (Req->TD) {
         UHCISetupTD(Req);
-        Req->QH->VerticalLink = (u32)(u64)Req->TD | 0x02;
+        Req->QH->VerticalLink = (u32)(u64)Req->TD | 0x00;
     } else {
         return UHCI_ERROR_GENERAL;
     }
@@ -561,7 +613,7 @@ UHCIResult UHCISubmitRequest(UHCIContext *Ctx, UHCIRequest *Req)
     
     u16 FrameNum = UHCIGetFrameNumber(Ctx);
     u16 FrameIdx = FrameNum & (UHCI_FRAME_LIST_SIZE - 1);
-    Ctx->FrameList[FrameIdx].Pointer = (u32)(u64)Req->QH;
+    Ctx->FrameList[FrameIdx].Pointer = (u32)(u64)Req->QH | 0x02;
 
     Req->Next = Ctx->PendingRequests;
     Ctx->PendingRequests = Req;
@@ -640,8 +692,12 @@ static UHCIResult UHCIPollTD(UHCIContext *Ctx, UHCIRequest *Req)
     Req->Success = 1;
     Req->Result = UHCI_OK;
 
-    u16 ActualLen = (ControlStatus >> 16) & 0x7FF;
-    Req->ActualLength = ActualLen;
+    u16 ActualLenField = (ControlStatus >> 16) & 0x7FF;
+    if (ActualLenField == 0x7FF) {
+        Req->ActualLength = 0;
+    } else {
+        Req->ActualLength = ActualLenField + 1;
+    }
 
     return UHCI_OK;
 }
@@ -732,6 +788,12 @@ UHCIResult UHCIPoll(UHCIContext *Ctx)
     Ctx->HC->FrameNumber = UHCIInW(Ctx->HC, UHCI_FRNUM_OFFSET);
 
     u16 Status = UHCIInW(Ctx->HC, UHCI_STS_OFFSET);
+    
+    if (Status & (UHCI_STS_USBINT | UHCI_STS_USBERR))
+    {
+        UHCIClearStatusBit(Ctx->HC, Status & (UHCI_STS_USBINT | UHCI_STS_USBERR));
+    }
+
     if (Status & UHCI_STS_SYSERR)
     {
         UHCIClearStatusBit(Ctx->HC, UHCI_STS_SYSERR);
