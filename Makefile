@@ -60,7 +60,12 @@ run-whpx: boot.efi
 	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+	-device piix3-usb-uhci,id=uhci-bus \
+  	-device usb-ehci,id=ehci-bus \
+  	-device usb-mouse,bus=uhci-bus.0 \
+  	-device usb-kbd,bus=uhci-bus.0 \
+  	-device usb-tablet,bus=uhci-bus.0 \
 
 
 debug-whpx: boot.efi
@@ -78,7 +83,12 @@ debug-whpx: boot.efi
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+-device piix3-usb-uhci,id=uhci-bus \
+  -device usb-ehci,id=ehci-bus \
+  -device usb-mouse,bus=uhci-bus.0 \
+  -device usb-kbd,bus=uhci-bus.0 \
+  -device usb-tablet,bus=uhci-bus.0 \
 
 run-kvm: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
@@ -90,15 +100,14 @@ run-kvm: boot.efi
 		-smp 2 \
 		-serial stdio \
 		-accel kvm \
-		-cpu Broadwell,hle=off,rtm=off \
+		-cpu host \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci1 \
-		-device usb-kbd,bus=uhci1.0,port=1 \
-		-device usb-mouse,bus=uhci1.0,port=2 \
-		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device intel-hda \
-		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
+		-device piix3-usb-uhci,id=uhci-bus \
+		-device usb-mouse,bus=uhci-bus.0 \
+		-device usb-kbd,bus=uhci-bus.0 \
+		-device usb-tablet,bus=uhci-bus.0 \
+		-d guest_errors,unimp -D qemu.log \
+		-no-reboot -no-shutdown
 
 
 debug-kvm: boot.efi
@@ -119,7 +128,11 @@ debug-kvm: boot.efi
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+		-device piix3-usb-uhci,id=uhci-bus \
+		-device usb-mouse,bus=uhci-bus.0 \
+		-device usb-kbd,bus=uhci-bus.0 \
+		-device usb-tablet,bus=uhci-bus.0 \
 
 run-tcg: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
@@ -131,15 +144,14 @@ run-tcg: boot.efi
 		-smp 2 \
 		-serial stdio \
 		-accel tcg \
-		-cpu Broadwell,hle=off,rtm=off \
+		-cpu Broadwell \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci1 \
-		-device usb-kbd,bus=uhci1.0,port=1 \
-		-device usb-mouse,bus=uhci1.0,port=2 \
-		-d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device intel-hda \
-		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
+		-device piix3-usb-uhci,id=uhci-bus \
+		-device usb-mouse,bus=uhci-bus.0 \
+		-device usb-kbd,bus=uhci-bus.0 \
+		-device usb-tablet,bus=uhci-bus.0 \
+		-d guest_errors,unimp -D qemu.log \
+		-no-reboot -no-shutdown
 
 
 debug-tcg: boot.efi
@@ -160,7 +172,11 @@ debug-tcg: boot.efi
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+		-device piix3-usb-uhci,id=uhci-bus \
+		-device usb-mouse,bus=uhci-bus.0 \
+		-device usb-kbd,bus=uhci-bus.0 \
+		-device usb-tablet,bus=uhci-bus.0 \
 
 clean:
 	rm -f *.o boot.exe boot.efi boot.dll qemu.log

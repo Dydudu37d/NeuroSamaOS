@@ -1,3 +1,4 @@
+#pragma clang optimize off
 #include "idt.h"
 #include "debug.h"
 #include "Context.h"
@@ -43,6 +44,11 @@ u8 get_instruction_length(u64 rip) {
     volatile u8* p = (volatile u8*)rip;
     u8 len = 0;
     
+    _Bool is_two_byte = 0;
+    _Bool has_modrm = 0;
+    u8 imm_size = 0;
+    u8 op = 0;
+    
     while (len < 15) {
         u8 b = p[len];
         if (b == 0x66 || b == 0x67 || b == 0xF0 || b == 0xF2 || b == 0xF3 ||
@@ -56,10 +62,12 @@ u8 get_instruction_length(u64 rip) {
     if ((p[len] & 0xF0) == 0x40) {
         len++;
     }
+    
     if (p[len] == 0xC5) {
         len += 2;
         u8 modrm = p[len];
         len++;
+        has_modrm = 1;
         goto decode_modrm;
     }
 
@@ -67,13 +75,11 @@ u8 get_instruction_length(u64 rip) {
         len += 3;
         u8 modrm = p[len];
         len++;
+        has_modrm = 1;
         goto decode_modrm;
     }
 
-    u8 op = p[len++];
-    _Bool is_two_byte = 0;
-    _Bool has_modrm = 0;
-    u8 imm_size = 0;
+    op = p[len++];
 
     if (op == 0x0F) {
         is_two_byte = 1;
@@ -91,9 +97,8 @@ u8 get_instruction_length(u64 rip) {
             else { has_modrm = 1; }
         }
     } else {
-
         if ((op & 0xC0) == 0x00) { if ((op & 0x07) <= 0x05) has_modrm = 1; }
-        else if ((op & 0xF8) == 0x50) { has_modrm = 0; }
+        else if ((op & 0xF8) == 0.50) { has_modrm = 0; }
         else if ((op & 0xF8) == 0x68) { 
             if (op == 0x68) imm_size = 4;
             else if (op == 0x6A) imm_size = 1;
@@ -104,10 +109,10 @@ u8 get_instruction_length(u64 rip) {
         else if ((op & 0xFC) == 0x80) { has_modrm = 1; imm_size = ((op & 3) == 1) ? 4 : 1; }
         else if ((op & 0xFC) == 0x88) { has_modrm = 1; }
         else if ((op & 0xF0) == 0xB0) { imm_size = (op & 0x08) ? 4 : 1; }
-        else if ((op & 0xFC) == 0xC6) { has_modrm = 1; imm_size = (op & 1) ? 4 : 1; }
+        else if ((op & 0xFC) == 0xC4) { has_modrm = 1; imm_size = (op & 1) ? 4 : 1; }
         else if (op == 0xE8 || op == 0xE9) { imm_size = 4; }
         else if (op == 0xEB) { imm_size = 1; }
-        else if ((op & 0xFC) == 0xD0 || (op & 0xFC) == 0xF6) { 
+        else if ((op & 0xFC) == 0xD0 || (op & 0xFC) == 0xF4) { 
             has_modrm = 1; 
             if (op == 0xF6 || op == 0xF7) { 
                 u8 next_modrm = p[len]; 
@@ -149,7 +154,7 @@ decode_modrm:
 void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *rflags) {
     if (InExceptionHandler) {
         outb_str("\nRECURSIVE EXCEPTION HALT,I am Sorry\n");
-        while(1) { __asm__ volatile("cli; hlt"); }
+        while(1)__asm__ volatile("cli\n\t""hlt\n\t"); 
     }
     InExceptionHandler = 1;
     
@@ -175,7 +180,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
 
     if (vector == 8) {
         outb_str("DF HALT,I am Sorry\n");
-        while(1) { __asm__ volatile("cli; hlt"); }
+        while(1) { __asm__ volatile("cli\n\t""hlt\n\t"); }
     }
 
     if (*rip != 0) {
@@ -183,7 +188,7 @@ void handle_exception_fast(u64 vector, u64 error_code, u64 *rip, u64 *cs, u64 *r
         *rip += len;
     } else {
         outb_str("NULL RIP HALT,I am Sorry\n");
-        while(1) { __asm__ volatile("cli; hlt"); }
+        while(1) { __asm__ volatile("cli\n\t""hlt\n\t"); }
     }
     
     InExceptionHandler = 0;
@@ -330,3 +335,4 @@ void InitIDT() {
 void InitInterruptSystem() {
     InitIDT();
 }
+#pragma clang optimize on

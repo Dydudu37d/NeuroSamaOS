@@ -22,8 +22,6 @@
 #include "uhci.h"
 #include "UhciMouse.h"
 #include "UhciKeyboard.h"
-#include "PS2Mouse.h"
-#include "PS2Keyboard.h"
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
@@ -34,26 +32,6 @@
 
 void* GopOut=NULL;
 HDR_PIXEL* GopBack=NULL;
-
-static void *USBMousePollTask(void *Arg) {
-    USBMousePoll((USBMouse*)Arg);
-    return Arg;
-}
-
-static void *USBKeyboardPollTask(void *Arg) {
-    USBKeyboardPoll((USBKeyboard*)Arg);
-    return Arg;
-}
-
-static void *XhciMousePollTask(void *Arg) {
-    MousePoll((MouseDevice*)Arg);
-    return Arg;
-}
-
-static void *XhciKeyboardPollTask(void *Arg) {
-    KeyboardPoll((KeyboardDevice*)Arg);
-    return Arg;
-}
 
 EFI_BOOT_SERVICES *bs=NULL;
 EFI_GOP_MODE GopMode={0};
@@ -72,6 +50,16 @@ RegContext MainGlobalContext={0};
 EFI_HANDLE ImageBase;
 
 AllocPool KernelPool = { .Head=NULL};
+
+void *USBMousePollTask(void *Arg) {
+    USBMousePoll((USBMouse*)Arg);
+    return Arg;
+}
+
+void *USBKeyboardPollTask(void *Arg) {
+    USBKeyboardPoll((USBKeyboard*)Arg);
+    return Arg;
+}
 
 #pragma clang optimize off                                                      
 __attribute__((optnone))
@@ -616,136 +604,108 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("GTX960 Not Found.\n");
     }
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
-    void *(*GMousePoll)(void *) = NULL;
-    void *(*GKeyboardPoll)(void *) = NULL;
-
     DebugStr("Init UHCI.\n");
-    UHCIHostController *hc=NULL;
-    UHCIContext *ctx=NULL;
-    USBMouse* UhciMouse=NULL;
-    USBKeyboard* UhciKeyboard=NULL;
+    UHCIHostController *hc = NULL;
+    UHCIContext *ctx = NULL;
+    USBMouse* UhciMouse = NULL;
+    USBKeyboard* UhciKeyboard = NULL;
+
     u8 Bus = 0xFF, Dev = 0xFF, Func = 0xFF;
     PCIFindDeviceByClass(UHCI_CLASS_CODE, UHCI_SUBCLASS, UHCI_INTERFACE, &Bus, &Dev, &Func);
-    _Bool UhciFound = (Dev != 0xFF);
     if (Dev != 0xFF) {
-        DebugStr("Found UHCI: Bus=");
-        DebugU64(Bus);
-        DebugStr(" Slot=");
-        DebugU64(Dev);
-        DebugStr(" Func=");
-        DebugU64(Func);
-        DebugStr("\r\n");
+        u16 pci_cmd = PCIReadWORD(Bus, Dev, Func, 0x04);
+        pci_cmd |= (1 << 0) | (1 << 1) | (1 << 2);
+        PCIWriteWORD(Bus, Dev, Func, 0x04, pci_cmd);
+        
+        DebugStr("PCI Command Region Activated. Command: 0x");
+        DebugU16(PCIReadWORD(Bus, Dev, Func, 0x04));
+        DebugChar('\n');
 
         hc = UHCICreate(Bus, Dev, Func, &KernelPool);
-        if (!hc) {
-            DebugStr("Failed to create UHCI controller\r\n");
-            return;
-        }
+        if (!hc) goto uhci_end;
 
         ctx = Alloc(&KernelPool, sizeof(UHCIContext));
-        if (!ctx) return;
+        if (!ctx) goto uhci_end;
         MemSet(ctx, 0, sizeof(UHCIContext));
-
         ctx->HC = hc;
         ctx->MemoryPool = &KernelPool;
         ctx->HandleCompletion = OnRequestComplete;
         ctx->HandleError = OnRequestError;
         ctx->HandlePortChange = OnPortChange;
 
-        UHCIResult result = UHCIInitialize(ctx);
-        if (result != UHCI_OK) {
-            DebugStr("UHCI init failed: ");
-            DebugU64(result);
-            DebugStr("\r\n");
-            return;
-        }
+        if (UHCIInitialize(ctx) != UHCI_OK) goto uhci_end;
 
-        UHCIConfigure(ctx, 1, 0);
+        UHCIConfigure(ctx, 64, 0);
         UHCIStart(ctx);
+        UHCIDumpStatus(ctx);
+        DebugStr("UHCI started. Checking ports...\r\n");
+        SystemBusySleepMs(300);
 
-        DebugStr("UHCI initialized and started\r\n");
+        for (u8 p = 0; p < 2; p++) {
+            DebugStr("Port ");
+            DebugU8(p);
+            DebugStr(" initial status: 0x");
+            DebugU16(UHCIGetPortStatus(ctx, p));
+            DebugStr("\r\n");
 
-        u16 Port0 = UHCIGetPortStatus(ctx, 0);
-        u16 Port1 = UHCIGetPortStatus(ctx, 1);
-        DebugStr("Port0 raw: 0x");
-        DebugU64(Port0);
-        DebugStr("\r\n");
-        DebugStr("Port1 raw: 0x");
-        DebugU64(Port1);
-        DebugStr("\r\n");
+            UHCIClearPortChange(ctx, p);
+            SystemBusySleepMs(50);
 
-        if (Port0 != 0xFFFF && (Port0 & UHCI_PORTSC_CCS)) {
-            DebugStr("Device connected on port 00\r\n");
-            UHCIEnablePort(ctx, 0);
-            UhciMouse = USBMouseInit(ctx, 0);
-            GMousePoll=&USBMousePollTask;
-            TaskAdd((Task){.Active=1,.Arg=UhciMouse,.CallFunc=GMousePoll,.DelFunc=NULL,.Name="UhciMouse",.NextWaitNs=0,.IntervalNs=1,.Target=NULL},1);
-        }
+            u16 status = UHCIGetPortStatus(ctx, p);
+            if (status & UHCI_PORTSC_CCS) {
+                DebugStr("Device detected on port ");
+                DebugU8(p);
+                DebugStr(" -> Resetting...\r\n");
 
-        if (Port1 != 0xFFFF && (Port1 & UHCI_PORTSC_CCS)) {
-            DebugStr("Device connected on port 01\r\n");
-            UHCIEnablePort(ctx, 1);
-            UhciKeyboard = USBKeyboardInit(ctx, 1);
-            GKeyboardPoll=&USBKeyboardPollTask;
-            TaskAdd((Task){.Active=1,.Arg=UhciKeyboard,.CallFunc=GKeyboardPoll,.DelFunc=NULL,.Name="UhciKeyboard",.NextWaitNs=0,.IntervalNs=1,.Target=NULL},1);
-        }
-    }
-    if (!UhciMouse) DebugStr("No Uhci Mouse Drive.\n");
-    if (!UhciKeyboard) DebugStr("No Uhci Keyboard Drive.\n");
-    u8 XhciBus = 0xFF, XhciDev = 0xFF, XhciFunc = 0xFF;
-    PCIFindDeviceByClass(0x0C, 0x03, 0x30, &XhciBus, &XhciDev, &XhciFunc);
-    _Bool XhciFound = (XhciDev != 0xFF);
-    XhciController* Xhci=NULL;
-    if (XhciDev != 0xFF) {
-        DebugStr("Found XHCI: Bus=");
-        DebugU64(XhciBus);
-        DebugStr(" Slot=");
-        DebugU64(XhciDev);
-        DebugStr(" Func=");
-        DebugU64(XhciFunc);
-        DebugStr("\r\n");
-        Xhci=XhciInit(XhciGetMmioBase(XhciBus,XhciDev,XhciFunc));
-    }
-    MouseState PS2MouseState;
-    if (!UhciMouse && Xhci) {
-        MouseDevice* XhciMouse = MouseInit(Xhci);
-        if (XhciMouse) {
-            GMousePoll=&XhciMousePollTask;
-            TaskAdd((Task){.Active=1,.Arg=XhciMouse,.CallFunc=GMousePoll,.DelFunc=NULL,.Name="XhciMouse",.NextWaitNs=0,.IntervalNs=1000000/60,.Target=NULL},1);
-        }
-    }
-    if (!UhciKeyboard && Xhci) {
-        KeyboardDevice* XhciKeyboard = KeyboardInit(Xhci);
-        if (XhciKeyboard) {
-            GKeyboardPoll=&XhciKeyboardPollTask;
-            TaskAdd((Task){.Active=1,.Arg=XhciKeyboard,.CallFunc=GKeyboardPoll,.DelFunc=NULL,.Name="XhciKeyboard",.NextWaitNs=0,.IntervalNs=1000000/60,.Target=NULL},1);
+                UHCIResetPort(ctx, p);
+                SystemBusySleepMs(100);
+                UHCIEnablePort(ctx, p);
+                SystemBusySleepMs(100);
+
+                status = UHCIGetPortStatus(ctx, p);
+                DebugStr("After reset status: 0x");
+                DebugU16(status);
+                DebugStr("\r\n");
+
+                if (status & UHCI_PORTSC_PE) {
+                    DebugStr("Port enabled successfully!\r\n");
+                    UhciMouse = USBMouseInit(ctx, p);
+                    if (UhciMouse) {
+                        TaskAdd((Task){.Active=1, .Arg=UhciMouse, .CallFunc=USBMousePollTask, .Name="UhciMouse", .IntervalNs=10000000}, 1);
+                    }
+                    if (!UhciMouse) {
+                        DebugStr("Not a Mouse. re-resetting port for Keyboard...\r\n");
+                        UHCIResetPort(ctx, p);
+                        SystemBusySleepMs(100);
+                        UHCIEnablePort(ctx, p);
+                        SystemBusySleepMs(100);
+                        if (UHCIGetPortStatus(ctx, p) & UHCI_PORTSC_PE) {
+                            UhciKeyboard = USBKeyboardInit(ctx, p);
+                            if (UhciKeyboard) {
+                                TaskAdd((Task){.Active=1, .Arg=UhciKeyboard, .CallFunc=USBKeyboardPollTask, .Name="UhciKeyboard", .IntervalNs=10000000}, 1);
+                            }
+                        }
+                    }
+                }
+            } else {
+                DebugStr("No device on port ");
+                DebugU8(p);
+                DebugStr("\r\n");
+            }
         }
     }
-    if (!UhciMouse){
-        DebugStr("Try PS/2 Mouse.\n");
-        PS2MouseInit();
-        PS2MouseSetDPI(0x3);
-        GMousePoll=&PS2GetMouseState;
-        TaskAdd((Task){.Active=1,.Arg=&PS2MouseState,.CallFunc=GMousePoll,.DelFunc=NULL,.Name="PS2Mouse",.NextWaitNs=0,.IntervalNs=1000000000/60,.Target=NULL},1);
-    }
-    char PS2KeyboardGetChar = 0;
-    if (!UhciKeyboard){
-        DebugStr("Try PS/2 Keyboard.\n");
-        PS2KeyboardInit();
-        GKeyboardPoll = &PS2KeyboardPoll;
-        TaskAdd((Task){.Active=1,.Arg=&PS2KeyboardGetChar,.CallFunc=GKeyboardPoll,.DelFunc=NULL,.Name="PS2Keyboard",.NextWaitNs=0,.IntervalNs=1000000000/60,.Target=NULL},1);
-    }
 
+    uhci_end:
+    if (!ctx) DebugStr("UHCI init failed.\n");
+    else DebugStr("UHCI initialization completed.\r\n");
+    
     DebugStr("Loop.\n");
     u8 prevModifiers = 0;
     u8 prevKeys[6] = {0};
     while (1){
         GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x7FFF));
         TaskPoll();
-        if (PS2KeyboardGetChar!=0){
-            DebugChar(PS2KeyboardGetChar);
-            PS2KeyboardGetChar=0;
-        }
+
         GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFFFF, 0xFFFF, 0x7FFF));
         GOPFlash();
     }

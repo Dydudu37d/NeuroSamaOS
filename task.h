@@ -10,14 +10,14 @@
 #define ERROR(x) x>MaxTaskCount
 
 typedef struct{
-    void (*CallFunc)(void*);
-    void (*DelFunc)(void*);
+    void* (*CallFunc)(void*);
+    void* (*DelFunc)(void*);
     void *Arg;
     _Bool Active;
     const char* Name;
     u64 NextWaitNs;
     u64 IntervalNs;
-    
+    void* Target;
 } Task;
 
 u16 TaskAdd(Task AddTask,_Bool SystemTask);

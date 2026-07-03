@@ -37,7 +37,10 @@ void TaskPoll(void){
         if (Now >= Tasks[i].NextWaitNs){
             SaveContext(&MainGlobalContext);
             
-            if (Tasks[i].CallFunc) Tasks[i].CallFunc(Tasks[i].Arg);
+            if (Tasks[i].CallFunc) {
+                if(Tasks[i].Target) Tasks[i].Target=Tasks[i].CallFunc(Tasks[i].Arg);
+                else Tasks[i].CallFunc(Tasks[i].Arg);
+            }
             
             if (Tasks[i].IntervalNs > 0){
                 Tasks[i].NextWaitNs = Now + Tasks[i].IntervalNs;

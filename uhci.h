@@ -54,6 +54,7 @@
 #define UHCI_PORTSC_RD 0x0040
 #define UHCI_PORTSC_PR 0x0200
 #define UHCI_PORTSC_SUSP 0x1000
+#define UHCI_PORTSC_W1C (UHCI_PORTSC_CSC | UHCI_PORTSC_PEC)
 
 #define UHCI_TD_ACTIVE 0x00800000
 #define UHCI_TD_STALL 0x00400000
@@ -74,8 +75,9 @@
 #define UHCI_TD_TOKEN_DEVADDR_SHIFT 8
 #define UHCI_TD_TOKEN_ENDPT_MASK 0x00078000
 #define UHCI_TD_TOKEN_ENDPT_SHIFT 15
-#define UHCI_TD_TOKEN_DATALEN_MASK 0x07F80000
-#define UHCI_TD_TOKEN_DATALEN_SHIFT 19
+#define UHCI_TD_TOKEN_DATALEN_MASK 0xFFE00000
+#define UHCI_TD_TOKEN_DATALEN_SHIFT 21
+#define UHCI_TD_TOKEN_TOGGLE_SHIFT 19
 #define UHCI_TD_TOKEN_ISO 0x08000000
 
 #define UHCI_FRAME_TERMINATE 0x00000001
@@ -157,7 +159,7 @@ typedef struct UHCIFrameListEntry
     u32 Pointer;
 } UHCIFrameListEntry;
 
-typedef struct UHCITransferDescriptor
+typedef struct __attribute__((aligned(16))) UHCITransferDescriptor
 {
     u32 LinkPointer;
     u32 ControlStatus;
@@ -166,7 +168,7 @@ typedef struct UHCITransferDescriptor
     u32 Reserved[4];
 } UHCITransferDescriptor;
 
-typedef struct UHCIQueueHead
+typedef struct __attribute__((aligned(16))) UHCIQueueHead
 {
     u32 HorizontalLink;
     u32 VerticalLink;
