@@ -28,8 +28,6 @@
 #define PAGE_LARGE    (1ULL << 7)
 #define PAGE_HUGE     (1ULL << 7)
 
-#define POOL_PHYS_START 0x04000000ULL
-
 void* GopOut=NULL;
 HDR_PIXEL* GopBack=NULL;
 
@@ -239,8 +237,8 @@ u64 GetXhciMmioBase() {
     return 0;
 }
 
-void InitPool(u64 PoolSize){
-    AllocBlock *block = (AllocBlock*)POOL_PHYS_START;
+void InitPool(u64 PoolSize,void* Start){
+    AllocBlock *block = (AllocBlock*)Start;
     block->size=PoolSize - sizeof(AllocBlock);
     block->is_free=1;
     block->next = NULL;
@@ -373,6 +371,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     FPUInit();
     DebugInit();
     InitClock();
+    
     EFI_LOADED_IMAGE_PROTOCOL *LoadedImage = NULL;
     
     EFI_STATUS status = sys->BootServices->HandleProtocol(
@@ -482,6 +481,18 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         while(1) __asm__ volatile("cli\n\t hlt");
     }
     KernelStack = (u8*)stack_alloc_addr;
+    DebugStr("InitPool.\n");
+    EFI_PHYSICAL_ADDRESS pool_alloc_addr = MaxAvailableAddress; 
+    status = bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, EFI_SIZE_TO_PAGES(128 * 1024 * 1024), &pool_alloc_addr);
+    if (status != EFI_SUCCESS) {
+        DebugStr("Allocate KernelPool failed!\n");
+        while(1) __asm__ volatile("cli\n\t hlt");
+    }
+    u64 PoolSize = 0x40000000;
+    if (pool_alloc_addr + PoolSize > MaxPhysicalAddress) {
+        PoolSize = MaxPhysicalAddress - pool_alloc_addr;
+    }
+    InitPool(PoolSize,pool_alloc_addr);
     DebugStr("ExitBootServices.\n");
     DebugStr("ExitBootServices.\n");
     ExitBootServices_Safe(image);
@@ -496,12 +507,6 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     );
     DebugStr("Mov pml4 to cr3.\n");
     LoadDynamicPageTable(pml5);
-    DebugStr("InitPool.\n");
-    u64 PoolSize = 0x40000000;
-    if (POOL_PHYS_START + PoolSize > MaxPhysicalAddress) {
-        PoolSize = MaxPhysicalAddress - POOL_PHYS_START;
-    }
-    InitPool(PoolSize);
     DebugStr("AllocStack.\n");
     GopBack = (HDR_PIXEL*)(u64)AlignedAlloc(&KernelPool, GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL), 64);
 

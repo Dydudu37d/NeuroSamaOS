@@ -1,10 +1,8 @@
 #include "task.h"
 #include "clock.h"
-#include "Context.h"
 #include "idt.h"
 #include "str.h"
 
-extern RegContext MainGlobalContext;
 extern _Bool IDTGotError;
 
 Task Tasks[MaxTaskCount]={0};
@@ -35,8 +33,6 @@ void TaskPoll(void){
         if (!Tasks[i].Active) continue;
         
         if (Now >= Tasks[i].NextWaitNs){
-            SaveContext(&MainGlobalContext);
-            
             if (Tasks[i].CallFunc) {
                 if(Tasks[i].Target) Tasks[i].Target=Tasks[i].CallFunc(Tasks[i].Arg);
                 else Tasks[i].CallFunc(Tasks[i].Arg);
@@ -52,7 +48,6 @@ void TaskPoll(void){
             
             if (IDTGotError){
                 Tasks[i].Active = false;
-                LoadContext(MainGlobalContext);
                 IDTCloseError();
             }
         }

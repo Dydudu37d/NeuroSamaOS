@@ -1,12 +1,26 @@
+.extern KernelStack
+.extern mc_emergency_stack
+.extern mc_saved_old_rsp
+
 .global machine_check_handler
 machine_check_handler:
     cli
     leaq mc_saved_old_rsp(%rip), %rax
     movq %rsp, (%rax)
-    leaq mc_emergency_stack(%rip), %rax
-    addq $4096, %rax
-    movq %rax, %rsp
-    movq %rax, %rbp
+    movq KernelStack(%rip), %rbx
+    movq %rsp, %rcx
+    cmpq %rbx, %rcx
+    jb 1f
+    movq %rbx, %rdx
+    addq $134217728, %rdx
+    cmpq %rdx, %rcx
+    ja 1f
+    jmp 2f
+1:
+    leaq mc_emergency_stack(%rip), %rbp
+    movq %rbp, %rsp
+    addq $4096, %rsp
+2:
     pushq %rax
     pushq %rcx
     pushq %rdx
@@ -44,10 +58,10 @@ machine_check_handler:
     leaq msg_mcip(%rip), %rsi
     call print_string_asm
     jmp 2f
-    1:
+1:
     leaq msg_mce(%rip), %rsi
     call print_string_asm
-    2:
+2:
     movq $0x17B, %rcx
     rdmsr
     andq $0xFF, %rax
@@ -58,7 +72,7 @@ machine_check_handler:
     call print_dec_asm
     call print_newline_asm
     xorq %r13, %r13
-    3:
+3:
     cmpq %r14, %r13
     jge 9f
     movq %r13, %rax
@@ -69,7 +83,7 @@ machine_check_handler:
     shlq $32, %rdx
     orq  %rdx, %rax
     movq %rax, %r12
-    testq 0x8000000000000000, %rax
+    testq $0x8000000000000000, %rax
     jz 8f
     leaq msg_bank(%rip), %rsi
     call print_string_asm
@@ -83,20 +97,20 @@ machine_check_handler:
     outb %al, %dx
     movq %r12, %rdi
     call print_hex_asm
-    testq 0x2000000000000000, %r12
+    testq $0x2000000000000000, %r12
     jz 4f
     leaq msg_uc(%rip), %rsi
     call print_string_asm
     jmp 5f
-    4:
+4:
     leaq msg_corrected(%rip), %rsi
     call print_string_asm
-    5:
-    testq 0x0400000000000000, %r12
+5:
+    testq $0x0400000000000000, %r12
     jz 6f
     leaq msg_pcc(%rip), %rsi
     call print_string_asm
-    6:
+6:
     movq %r13, %rax
     shlq $2, %rax
     addq $0x402, %rax
@@ -110,7 +124,7 @@ machine_check_handler:
     call print_string_asm
     movq %rax, %rdi
     call print_hex_asm
-    7:
+7:
     movq %r13, %rax
     shlq $2, %rax
     addq $0x403, %rax
@@ -124,11 +138,11 @@ machine_check_handler:
     call print_string_asm
     movq %rax, %rdi
     call print_hex_asm
-    8:
+8:
     call print_newline_asm
     incq %r13
     jmp 3b
-    9:
+9:
     movq $0x17A, %rcx
     xorq %rax, %rax
     xorq %rdx, %rdx
@@ -148,13 +162,13 @@ machine_check_handler:
     popq %rcx
     popq %rax
     movq mc_saved_old_rsp(%rip), %rsp
+    testq $0x0400000000000000, %r15
+    jnz 10f
     iretq
-    10:
+10:
     leaq msg_halt(%rip), %rsi
     call print_string_asm
-    cli
-    11: hlt
-    jmp 11b
+    ret
     print_string_asm:
     pushq %rax
     pushq %rdx

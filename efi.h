@@ -40,6 +40,44 @@ typedef u64   EFI_PHYSICAL_ADDRESS;
 #define EFI_SECURITY_VIOLATION        ((EFI_STATUS)(1ULL << 63) | 26)
 #define EFI_ERROR(status) (((INTN)(status)) < 0)
 
+#define EFI_UNSPECIFIED_TIMEZONE 0x07FF
+
+#define EFI_VARIABLE_NON_VOLATILE                           0x00000001
+#define EFI_VARIABLE_BOOTSERVICE_ACCESS                     0x00000002
+#define EFI_VARIABLE_RUNTIME_ACCESS                         0x00000004
+#define EFI_VARIABLE_HARDWARE_ERROR_RECORD                  0x00000008
+#define EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS             0x00000010
+#define EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS  0x00000020
+#define EFI_VARIABLE_APPEND_WRITE                           0x00000040
+#define EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS          0x00000080
+
+#define CAPSULE_FLAGS_PERSIST_ACROSS_RESET  0x00010000
+#define CAPSULE_FLAGS_POPULATE_SYSTEM_TABLE 0x00020000
+#define CAPSULE_FLAGS_INITIATE_RESET        0x00040000
+
+#define SCAN_NULL       0x00
+#define SCAN_UP         0x01
+#define SCAN_DOWN       0x02
+#define SCAN_RIGHT      0x03
+#define SCAN_LEFT       0x04
+#define SCAN_HOME       0x05
+#define SCAN_END        0x06
+#define SCAN_INSERT     0x07
+#define SCAN_DELETE     0x08
+#define SCAN_PAGE_UP    0x09
+#define SCAN_PAGE_DOWN  0x0A
+#define SCAN_F1         0x0B
+#define SCAN_F2         0x0C
+#define SCAN_F3         0x0D
+#define SCAN_F4         0x0E
+#define SCAN_F5         0x0F
+#define SCAN_F6         0x10
+#define SCAN_F7         0x11
+#define SCAN_F8         0x12
+#define SCAN_F9         0x13
+#define SCAN_F10        0x14
+#define SCAN_ESC        0x17
+
 #define EfiReservedMemoryType       0
 #define EfiLoaderCode               1
 #define EfiLoaderData               2
@@ -138,7 +176,6 @@ typedef struct EFI_BOOT_SERVICES {
 } EFI_BOOT_SERVICES;
 
 typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
-
 typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
     EFI_STATUS (EFIAPI *Reset)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This, u8 ExtendedVerification);
     EFI_STATUS (EFIAPI *OutputString)(EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *This, u16 *String);
@@ -158,22 +195,92 @@ typedef struct EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL {
 } EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL;
 
 typedef struct {
+    u16 ScanCode;
+    u16 UnicodeChar;
+} EFI_INPUT_KEY;
+
+typedef struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
+typedef struct EFI_SIMPLE_TEXT_INPUT_PROTOCOL {
+    EFI_STATUS (EFIAPI *Reset)(
+        EFI_SIMPLE_TEXT_INPUT_PROTOCOL *This,
+        u8                             ExtendedVerification
+    );
+    EFI_STATUS (EFIAPI *ReadKeyStroke)(
+        EFI_SIMPLE_TEXT_INPUT_PROTOCOL *This,
+        EFI_INPUT_KEY                  *Key
+    );
+    u64 WaitForKey; 
+} EFI_SIMPLE_TEXT_INPUT_PROTOCOL;
+
+typedef struct {
     EFI_GUID VendorGuid;
-    void *VendorTable;
+    void     *VendorTable;
 } EFI_CONFIGURATION_TABLE;
 
 typedef struct {
+    u16 Year;
+    u8  Month;
+    u8  Day;
+    u8  Hour;
+    u8  Minute;
+    u8  Second;
+    u8  Pad1;
+    u32 Nanosecond;
+    s16 TimeZone;
+    u8  Daylight;
+    u8  Pad2;
+} EFI_TIME;
+
+typedef struct {
+    u32 Resolution;
+    u32 Accuracy;
+    u8  SetsToZero;
+} EFI_TIME_CAPABILITIES;
+
+typedef enum {
+    EfiResetCold,
+    EfiResetWarm,
+    EfiResetShutdown,
+    EfiResetPlatformSpecific
+} EFI_RESET_TYPE;
+
+typedef struct {
+    EFI_GUID CapsuleGuid;
+    u32      HeaderSize;
+    u32      Flags;
+    u32      CapsuleImageSize;
+} EFI_CAPSULE_HEADER;
+
+typedef struct EFI_RUNTIME_SERVICES {
+    EFI_TABLE_HEADER                Hdr;
+    EFI_STATUS (EFIAPI *GetTime)(EFI_TIME *Time, EFI_TIME_CAPABILITIES *Capabilities);
+    EFI_STATUS (EFIAPI *SetTime)(EFI_TIME *Time);
+    EFI_STATUS (EFIAPI *GetWakeupTime)(u8 *Enabled, u8 *Pending, EFI_TIME *Time);
+    EFI_STATUS (EFIAPI *SetWakeupTime)(u8 Enable, EFI_TIME *Time);
+    EFI_STATUS (EFIAPI *SetVirtualAddressMap)(UINTN MemoryMapSize, UINTN DescriptorSize, u32 DescriptorVersion, void *VirtualMap);
+    EFI_STATUS (EFIAPI *ConvertPointer)(UINTN DebugDisposition, void **Address);
+    EFI_STATUS (EFIAPI *GetVariable)(u16 *VariableName, EFI_GUID *VendorGuid, u32 *Attributes, UINTN *DataSize, void *Data);
+    EFI_STATUS (EFIAPI *GetNextVariableName)(UINTN *VariableNameSize, u16 *VariableName, EFI_GUID *VendorGuid);
+    EFI_STATUS (EFIAPI *SetVariable)(u16 *VariableName, EFI_GUID *VendorGuid, u32 Attributes, UINTN DataSize, void *Data);
+    EFI_STATUS (EFIAPI *GetNextHighMonotonicCount)(u32 *HighCount);
+    EFI_STATUS (EFIAPI *ResetSystem)(EFI_RESET_TYPE ResetType, EFI_STATUS ResetStatus, UINTN DataSize, void *ResetData);
+    EFI_STATUS (EFIAPI *UpdateCapsule)(EFI_CAPSULE_HEADER **CapsuleHeaderArray, UINTN CapsuleCount, EFI_PHYSICAL_ADDRESS ScatterGatherList);
+    EFI_STATUS (EFIAPI *QueryCapsuleCapabilities)(EFI_CAPSULE_HEADER **CapsuleHeaderArray, UINTN CapsuleCount, u64 *MaximumCapsuleSize, EFI_RESET_TYPE *ResetType);
+    EFI_STATUS (EFIAPI *QueryVariableInfo)(u32 Attributes, u64 *MaximumVariableStorageSize, u64 *RemainingVariableStorageSize, u64 *MaximumVariableSize);
+} EFI_RUNTIME_SERVICES;
+
+typedef struct EFI_SYSTEM_TABLE{
     EFI_TABLE_HEADER Hdr;
     u16 *FirmwareVendor;
     u32 FirmwareRevision;
     u32 _padding;
     EFI_HANDLE ConsoleInHandle;
-    void *ConIn;
+    EFI_SIMPLE_TEXT_INPUT_PROTOCOL *ConIn;
     EFI_HANDLE ConsoleOutHandle;
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;
     EFI_HANDLE StandardErrorHandle;
     EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *StdErr;
-    void *RuntimeServices;
+    EFI_RUNTIME_SERVICES *RuntimeServices;
     EFI_BOOT_SERVICES *BootServices;
     UINTN NumberOfTableEntries;
     EFI_CONFIGURATION_TABLE *ConfigurationTable;
