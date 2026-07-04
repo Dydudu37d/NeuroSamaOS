@@ -15,6 +15,9 @@ volatile _Bool InExceptionHandler = 0;
 volatile static u64 Cr2;
 volatile static u64 Cr3;
 
+__attribute__((aligned(16))) u8 mc_emergency_stack[4096];
+volatile u64 mc_saved_old_rsp = 0;
+
 struct InterruptFrame {
     u64 rip;
     u64 cs;
@@ -259,7 +262,6 @@ EXC_HANDLER_WITH_ERROR(14);
 EXC_HANDLER_NO_ERROR(15);
 EXC_HANDLER_NO_ERROR(16);
 EXC_HANDLER_WITH_ERROR(17);
-EXC_HANDLER_NO_ERROR(18);
 EXC_HANDLER_NO_ERROR(19);
 EXC_HANDLER_NO_ERROR(20);
 EXC_HANDLER_WITH_ERROR(21);
@@ -274,9 +276,275 @@ EXC_HANDLER_NO_ERROR(29);
 EXC_HANDLER_NO_ERROR(30);
 EXC_HANDLER_NO_ERROR(31);
 
-__attribute__((interrupt))
-void default_hardware_interrupt_handler(struct InterruptFrame* frame) {
+__attribute__((interrupt)) void default_hardware_interrupt_handler(struct InterruptFrame* frame) {
     
+}
+
+__attribute__((naked, noreturn)) void machine_check_handler(void) {
+    __asm__ volatile(
+        "cli\n\t"
+        "leaq mc_saved_old_rsp(%%rip), %%rax\n\t"
+        "movq %%rsp, (%%rax)\n\t"
+        "leaq mc_emergency_stack(%%rip), %%rax\n\t"
+        "addq $4096, %%rax\n\t"
+        "movq %%rax, %%rsp\n\t"
+        "movq %%rax, %%rbp\n\t"
+
+        "pushq %%rax\n\t"
+        "pushq %%rcx\n\t"
+        "pushq %%rdx\n\t"
+        "pushq %%rbx\n\t"
+        "pushq %%rsi\n\t"
+        "pushq %%rdi\n\t"
+        "pushq %%r8\n\t"
+        "pushq %%r9\n\t"
+        "pushq %%r10\n\t"
+        "pushq %%r11\n\t"
+        "pushq %%r12\n\t"
+        "pushq %%r13\n\t"
+        "pushq %%r14\n\t"
+        "pushq %%r15\n\t"
+        
+        "movq $IA32_MCG_STATUS, %%rcx\n\t"
+        "rdmsr\n\t"
+        "shlq $32, %%rdx\n\t"
+        "orq  %%rdx, %%rax\n\t"
+        "movq %%rax, %%r15\n\t"
+        
+        "movq $0x3F8, %%rdx\n\t"
+        "movb $'M', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movb $'C', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movb $':', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movb $' ', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        
+        "movq %%r15, %%rdi\n\t"
+        "call print_hex_asm\n\t"
+        "movb $' ', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        
+        "testq $4, %%r15\n\t"
+        "jz 1f\n\t"
+        "leaq msg_mcip(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "jmp 2f\n\t"
+        "1:\n\t"
+        "leaq msg_mce(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        
+        "2:\n\t"
+        "movq $IA32_MCG_CAP, %%rcx\n\t"
+        "rdmsr\n\t"
+        "andq $0xFF, %%rax\n\t"
+        "movq %%rax, %%r14\n\t"
+        
+        "leaq msg_bank_count(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "movq %%r14, %%rdi\n\t"
+        "call print_dec_asm\n\t"
+        "call print_newline_asm\n\t"
+        
+        "xorq %%r13, %%r13\n\t"
+        "3:\n\t"
+        "cmpq %%r14, %%r13\n\t"
+        "jge 9f\n\t"
+        
+        "movq %%r13, %%rax\n\t"
+        "shlq $2, %%rax\n\t"
+        "addq $IA32_MC0_STATUS, %%rax\n\t"
+        "movq %%rax, %%rcx\n\t"
+        "rdmsr\n\t"
+        "shlq $32, %%rdx\n\t"
+        "orq  %%rdx, %%rax\n\t"
+        "movq %%rax, %%r12\n\t"
+        
+        "testq $0x8000000000000000, %%rax\n\t"
+        "jz 8f\n\t"
+        
+        "leaq msg_bank(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "movq %%r13, %%rdi\n\t"
+        "call print_dec_asm\n\t"
+        "movb $'=', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movb $'0', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movb $'x', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movq %%r12, %%rdi\n\t"
+        "call print_hex_asm\n\t"
+        
+        "testq $0x2000000000000000, %%r12\n\t"
+        "jz 4f\n\t"
+        "leaq msg_uc(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "jmp 5f\n\t"
+        "4:\n\t"
+        "leaq msg_corrected(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        
+        "5:\n\t"
+        "testq $0x0400000000000000, %%r12\n\t"
+        "jz 6f\n\t"
+        "leaq msg_pcc(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        
+        "6:\n\t"
+        "movq %%r13, %%rax\n\t"
+        "shlq $2, %%rax\n\t"
+        "addq $IA32_MC0_ADDR, %%rax\n\t"
+        "movq %%rax, %%rcx\n\t"
+        "rdmsr\n\t"
+        "shlq $32, %%rdx\n\t"
+        "orq  %%rdx, %%rax\n\t"
+        "testq %%rax, %%rax\n\t"
+        "jz 7f\n\t"
+        "leaq msg_addr(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "movq %%rax, %%rdi\n\t"
+        "call print_hex_asm\n\t"
+        
+        "7:\n\t"
+        "movq %%r13, %%rax\n\t"
+        "shlq $2, %%rax\n\t"
+        "addq $IA32_MC0_MISC, %%rax\n\t"
+        "movq %%rax, %%rcx\n\t"
+        "rdmsr\n\t"
+        "shlq $32, %%rdx\n\t"
+        "orq  %%rdx, %%rax\n\t"
+        "testq %%rax, %%rax\n\t"
+        "jz 8f\n\t"
+        "leaq msg_misc(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "movq %%rax, %%rdi\n\t"
+        "call print_hex_asm\n\t"
+        
+        "8:\n\t"
+        "call print_newline_asm\n\t"
+        "incq %%r13\n\t"
+        "jmp 3b\n\t"
+        
+        "9:\n\t"
+        "movq $IA32_MCG_STATUS, %%rcx\n\t"
+        "xorq %%rax, %%rax\n\t"
+        "xorq %%rdx, %%rdx\n\t"
+        "wrmsr\n\t"
+        "popq %%r15\n\t"
+        "popq %%r14\n\t"
+        "popq %%r13\n\t"
+        "popq %%r12\n\t"
+        "popq %%r11\n\t"
+        "popq %%r10\n\t"
+        "popq %%r9\n\t"
+        "popq %%r8\n\t"
+        "popq %%rdi\n\t"
+        "popq %%rsi\n\t"
+        "popq %%rbx\n\t"
+        "popq %%rdx\n\t"
+        "popq %%rcx\n\t"
+        "popq %%rax\n\t"
+        "movq mc_saved_old_rsp(%%rip), %%rsp\n\t"
+        "iretq\n\t"
+        "10:\n\t"
+        "leaq msg_halt(%%rip), %%rsi\n\t"
+        "call print_string_asm\n\t"
+        "cli\n\t"
+        "11: hlt\n\t"
+        "jmp 11b\n\t"
+        "print_string_asm:\n\t"
+        "pushq %%rax\n\t"
+        "pushq %%rdx\n\t"
+        "movq $0x3F8, %%rdx\n\t"
+        "1: movb (%%rsi), %%al\n\t"
+        "testb %%al, %%al\n\t"
+        "jz 2f\n\t"
+        "outb %%al, %%dx\n\t"
+        "incq %%rsi\n\t"
+        "jmp 1b\n\t"
+        "2: popq %%rdx\n\t"
+        "popq %%rax\n\t"
+        "ret\n\t"
+        
+        "print_hex_asm:\n\t"
+        "pushq %%rax\n\t"
+        "pushq %%rcx\n\t"
+        "pushq %%rdx\n\t"
+        "pushq %%rsi\n\t"
+        "movq $0x3F8, %%rdx\n\t"
+        "movq $60, %%rcx\n\t"
+        "leaq hex_table(%%rip), %%rsi\n\t"
+        "1: movq %%rdi, %%rax\n\t"
+        "shrq %%cl, %%rax\n\t"
+        "andq $0xF, %%rax\n\t"
+        "movb (%%rsi, %%rax), %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "subq $4, %%rcx\n\t"
+        "jge 1b\n\t"
+        "popq %%rsi\n\t"
+        "popq %%rdx\n\t"
+        "popq %%rcx\n\t"
+        "popq %%rax\n\t"
+        "ret\n\t"
+        
+        "print_dec_asm:\n\t"
+        "pushq %%rax\n\t"
+        "pushq %%rbx\n\t"
+        "pushq %%rcx\n\t"
+        "pushq %%rdx\n\t"
+        "pushq %%rsi\n\t"
+        "pushq %%rdi\n\t"
+        "movq $0x3F8, %%rdx\n\t"
+        "movq $10, %%rcx\n\t"
+        "xorq %%rbx, %%rbx\n\t"
+        "1: xorq %%rdx, %%rdx\n\t"
+        "divq %%rcx\n\t"
+        "pushq %%rdx\n\t"
+        "incq %%rbx\n\t"
+        "testq %%rax, %%rax\n\t"
+        "jnz 1b\n\t"
+        "movq $0x3F8, %%rdx\n\t"
+        "2: popq %%rax\n\t"
+        "addb $'0', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "decq %%rbx\n\t"
+        "jnz 2b\n\t"
+        "popq %%rdi\n\t"
+        "popq %%rsi\n\t"
+        "popq %%rdx\n\t"
+        "popq %%rcx\n\t"
+        "popq %%rbx\n\t"
+        "popq %%rax\n\t"
+        "ret\n\t"
+        
+        "print_newline_asm:\n\t"
+        "pushq %%rax\n\t"
+        "pushq %%rdx\n\t"
+        "movq $0x3F8, %%rdx\n\t"
+        "movb $' \\r', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "movb $' \\n', %%al\n\t"
+        "outb %%al, %%dx\n\t"
+        "popq %%rdx\n\t"
+        "popq %%rax\n\t"
+        "ret\n\t"
+        
+        "hex_table: .ascii \"0123456789ABCDEF\"\n\t"
+        "msg_mcip: .asciz \"MCIP \"\n\t"
+        "msg_mce: .asciz \"MCE \"\n\t"
+        "msg_bank_count: .asciz \"Banks:\"\n\t"
+        "msg_bank: .asciz \"Bank\"\n\t"
+        "msg_uc: .asciz \" UNCORRECTED\"\n\t"
+        "msg_corrected: .asciz \" CORRECTED\"\n\t"
+        "msg_pcc: .asciz \" PCC\"\n\t"
+        "msg_addr: .asciz \" ADDR:0x\"\n\t"
+        "msg_misc: .asciz \" MISC:0x\"\n\t"
+        "msg_halt: .asciz \"\\r\\nHALTING\\r\\n\"\n\t"
+        
+        ::: "memory"
+    );
 }
 
 void SetIDTEntry(int n, u64 handler, u16 selector, u8 type_attr) {
@@ -312,7 +580,7 @@ void InitIDT() {
     SetIDTEntry(15, (u64)exception_handler_15, 0x08, 0x8E);
     SetIDTEntry(16, (u64)exception_handler_16, 0x08, 0x8E);
     SetIDTEntry(17, (u64)exception_handler_17, 0x08, 0x8E);
-    SetIDTEntry(18, (u64)exception_handler_18, 0x08, 0x8E);
+    SetIDTEntry(18, (u64)machine_check_handler, 0x08, 0x8E);
     SetIDTEntry(19, (u64)exception_handler_19, 0x08, 0x8E);
     SetIDTEntry(20, (u64)exception_handler_20, 0x08, 0x8E);
     SetIDTEntry(21, (u64)exception_handler_21, 0x08, 0x8E);
