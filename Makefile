@@ -178,7 +178,12 @@ debug-tcg: boot.efi
 		-device usb-kbd,bus=uhci-bus.0 \
 		-device usb-tablet,bus=uhci-bus.0 \
 
+iso: boot.efi
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
+	xorriso -as mkisofs -o NeuroSamaOS.iso -J -R $(DISK_DIR)/
+
 clean:
-	rm -f *.o boot.exe boot.efi boot.dll qemu.log
+	rm -f *.o boot.exe boot.efi boot.dll qemu.log NeuroSamaOS.iso
 
 clear: clean
