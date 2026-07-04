@@ -2,7 +2,7 @@
 
 A UEFI Operating System for Neuro-Sama
 Erm......
-## We have
+## Operating System have
 - AVX256
 - SSE1 ~ SSE4.2
 - NT (Non-temporal instructions)

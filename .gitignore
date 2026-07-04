@@ -10,3 +10,8 @@ compile_commands.json
 .cache/
 disk/
 .vscode/c_cpp_properties.json
+*.iso
+*.img
+*.exe
+*.lib
+
