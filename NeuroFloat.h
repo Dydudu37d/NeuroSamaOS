@@ -17,8 +17,8 @@ typedef struct {
     union {
         u16 U;
         struct {
-            u16 Mantissa : 10;
-            u16 Point    : 5;
+            u16 Mantissa : 11;
+            u16 Point    : 4;
             u16 MSB      : 1;
         }__attribute__((packed));
     };
@@ -28,8 +28,8 @@ typedef struct {
     union {
         u32 U;
         struct {
-            u32 Mantissa : 25;
-            u32 Point    : 6;
+            u32 Mantissa : 26;
+            u32 Point    : 5;
             u32 MSB      : 1;
         }__attribute__((packed));
     };
@@ -39,8 +39,8 @@ typedef struct {
     union {
         u64 U;
         struct {
-            u64 Mantissa : 55;
-            u64 Point    : 8;
+            u64 Mantissa : 57;
+            u64 Point    : 6;
             u64 MSB      : 1;
         }__attribute__((packed));
     };

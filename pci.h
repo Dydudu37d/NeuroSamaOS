@@ -8,6 +8,7 @@
 
 #include "port.h"
 #include "int.h"
+#include "debug.h"
 
 static inline u32 PCIAddr(u8 Bus, u8 Slot, u8 Func, u8 Offset)
 {
@@ -132,15 +133,26 @@ static inline void PCIScanBus(void)
 
 static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 TargetProgIF, u8 *OutBus, u8 *OutDev, u8 *OutFunc)
 {
+    // 默认返回无效值
+    *OutBus = 0xFF;
+    *OutDev = 0xFF;
+    *OutFunc = 0xFF;
+    
     for (u16 Bus = 0; Bus < 256; Bus++)
     {
         for (u16 Dev = 0; Dev < 32; Dev++)
         {
             for (u16 Func = 0; Func < 8; Func++)
             {
+                if (Bus == 0 && Dev == 0 && Func == 0) {
+                    continue;
+                }
+                
                 u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
-                if ((VendorDevice & 0xFFFF) == 0xFFFF)
-                {
+                u16 Vendor = VendorDevice & 0xFFFF;
+                u16 Device = (VendorDevice >> 16) & 0xFFFF;
+                
+                if (Vendor == 0xFFFF) {
                     if (Func == 0) break;
                     continue;
                 }
@@ -150,13 +162,30 @@ static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 Ta
                 u8 SubClass = (ClassRev >> 16) & 0xFF;
                 u8 ProgIF = (ClassRev >> 8) & 0xFF;
 
-                if (ClassCode == TargetClass && SubClass == TargetSubClass && ProgIF == TargetProgIF)
-                {
-                    PCIEnableDevice(Bus, Dev, Func);
-                    *OutBus=Bus;
-                    *OutDev=Dev;
-                    *OutFunc=Func;
-                    return;
+                if (ClassCode == TargetClass && SubClass == TargetSubClass) {
+                    DebugStr("Found USB controller: Bus=");
+                    DebugU8(Bus);
+                    DebugStr(" Dev=");
+                    DebugU8(Dev);
+                    DebugStr(" Func=");
+                    DebugU8(Func);
+                    DebugStr(" Vendor=0x");
+                    DebugU16(Vendor);
+                    DebugStr(" Device=0x");
+                    DebugU16(Device);
+                    DebugStr(" ProgIF=0x");
+                    DebugU8(ProgIF);
+                    
+                    if (ProgIF == TargetProgIF) {
+                        DebugStr(" -> UHCI found!\n");
+                        PCIEnableDevice(Bus, Dev, Func);
+                        *OutBus = Bus;
+                        *OutDev = Dev;
+                        *OutFunc = Func;
+                        return;
+                    } else {
+                        DebugStr(" -> Not UHCI (ProgIF not 0x00)\n");
+                    }
                 }
             }
         }

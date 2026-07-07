@@ -138,6 +138,9 @@ typedef struct {
     u8 Polling;
     UHCIRequest *PollRequest;
     u8 ReportBuffer[8];
+    u8 IsPolling;
+    u8 IsLowSpeed;
+    u8 MaxPacketSize0;
 } USBKeyboard;
 
 USBKeyboard* USBKeyboardInit(UHCIContext *uhci, u8 port);
@@ -148,3 +151,4 @@ u8 USBKeyboardGetKey(USBKeyboard *keyboard, u8 index);
 u8 USBKeyboardIsKeyPressed(USBKeyboard *keyboard, u8 keyCode);
 void USBKeyboardPrintKeys(USBKeyboard *keyboard);
 void USBKeyboardTest(UHCIContext *uhci);
+void USBKeyboardCleanup(USBKeyboard *keyboard);

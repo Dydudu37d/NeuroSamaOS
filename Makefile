@@ -58,14 +58,10 @@ run-whpx: boot.efi
 		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
 	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device intel-hda \
-		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
-	-device piix3-usb-uhci,id=uhci-bus \
-  	-device usb-ehci,id=ehci-bus \
-  	-device usb-mouse,bus=uhci-bus.0 \
-  	-device usb-kbd,bus=uhci-bus.0 \
-  	-device usb-tablet,bus=uhci-bus.0 \
+		-device piix3-usb-uhci,id=uhci \
+		-device usb-kbd,bus=uhci.0 \
+		-device usb-mouse,bus=uhci.0 \
+		-trace events=./tmp/uhci.trace
 
 
 debug-whpx: boot.efi
@@ -82,13 +78,10 @@ debug-whpx: boot.efi
 		-boot order=d \
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
-		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
--device piix3-usb-uhci,id=uhci-bus \
-  -device usb-ehci,id=ehci-bus \
-  -device usb-mouse,bus=uhci-bus.0 \
-  -device usb-kbd,bus=uhci-bus.0 \
-  -device usb-tablet,bus=uhci-bus.0 \
+		-device piix3-usb-uhci,id=uhci \
+		-device usb-kbd,bus=uhci.0 \
+		-device usb-mouse,bus=uhci.0 \
+		-trace events=./tmp/uhci.trace
 
 run-kvm: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
@@ -102,12 +95,14 @@ run-kvm: boot.efi
 		-accel kvm \
 		-cpu host \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci-bus \
-		-device usb-mouse,bus=uhci-bus.0 \
-		-device usb-kbd,bus=uhci-bus.0 \
-		-device usb-tablet,bus=uhci-bus.0 \
+		-device intel-hda \
+		-device hda-duplex,audiodev=my-audio \
+		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+		-device piix3-usb-uhci,id=uhci \
+		-device usb-kbd,bus=uhci.0 \
+		-device usb-mouse,bus=uhci.0 \
 		-d guest_errors,unimp -D qemu.log \
-		-no-reboot -no-shutdown
+		-no-reboot -no-shutdown -trace events=./tmp/uhci.trace
 
 
 debug-kvm: boot.efi
@@ -129,10 +124,10 @@ debug-kvm: boot.efi
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
 		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
-		-device piix3-usb-uhci,id=uhci-bus \
-		-device usb-mouse,bus=uhci-bus.0 \
-		-device usb-kbd,bus=uhci-bus.0 \
-		-device usb-tablet,bus=uhci-bus.0 \
+		-device piix3-usb-uhci,id=uhci \
+		-device usb-kbd,bus=uhci.0 \
+		-device usb-mouse,bus=uhci.0 \
+		-trace events=./tmp/uhci.trace
 
 run-tcg: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
@@ -151,7 +146,7 @@ run-tcg: boot.efi
 		-device usb-kbd,bus=uhci-bus.0 \
 		-device usb-tablet,bus=uhci-bus.0 \
 		-d guest_errors,unimp -D qemu.log \
-		-no-reboot -no-shutdown
+		-no-reboot -no-shutdown -trace events=./tmp/uhci.trace
 
 
 debug-tcg: boot.efi
@@ -177,6 +172,7 @@ debug-tcg: boot.efi
 		-device usb-mouse,bus=uhci-bus.0 \
 		-device usb-kbd,bus=uhci-bus.0 \
 		-device usb-tablet,bus=uhci-bus.0 \
+		-trace events=./tmp/uhci.trace
 
 iso: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)

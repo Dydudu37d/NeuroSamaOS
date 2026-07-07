@@ -12,14 +12,14 @@ machine_check_handler:
     cmpq %rbx, %rcx
     jb 1f
     movq %rbx, %rdx
-    addq $134217728, %rdx
+    addq 134217728, %rdx
     cmpq %rdx, %rcx
     ja 1f
     jmp 2f
 1:
     leaq mc_emergency_stack(%rip), %rbp
     movq %rbp, %rsp
-    addq $4096, %rsp
+    addq 4096, %rsp
 2:
     pushq %rax
     pushq %rcx
@@ -35,25 +35,25 @@ machine_check_handler:
     pushq %r13
     pushq %r14
     pushq %r15
-    movq $0x17A, %rcx
+    movq 0x17A, %rcx
     rdmsr
-    shlq $32, %rdx
+    shlq 32, %rdx
     orq  %rdx, %rax
     movq %rax, %r15
-    movq $0x3F8, %rdx
-    movb $'M', %al
+    movq 0x3F8, %rdx
+    movb 'M', %al
     outb %al, %dx
-    movb $'C', %al
+    movb 'C', %al
     outb %al, %dx
-    movb $':', %al
+    movb ':', %al
     outb %al, %dx
-    movb $' ', %al
+    movb ' ', %al
     outb %al, %dx
     movq %r15, %rdi
     call print_hex_asm
-    movb $' ', %al
+    movb ' ', %al
     outb %al, %dx
-    testq $4, %r15
+    testq 4, %r15
     jz 1f
     leaq msg_mcip(%rip), %rsi
     call print_string_asm
@@ -62,9 +62,9 @@ machine_check_handler:
     leaq msg_mce(%rip), %rsi
     call print_string_asm
 2:
-    movq $0x17B, %rcx
+    movq 0x17B, %rcx
     rdmsr
-    andq $0xFF, %rax
+    andq 0xFF, %rax
     movq %rax, %r14
     leaq msg_bank_count(%rip), %rsi
     call print_string_asm
@@ -76,28 +76,28 @@ machine_check_handler:
     cmpq %r14, %r13
     jge 9f
     movq %r13, %rax
-    shlq $2, %rax
-    addq $0x401, %rax
+    shlq 2, %rax
+    addq 0x401, %rax
     movq %rax, %rcx
     rdmsr
-    shlq $32, %rdx
+    shlq 32, %rdx
     orq  %rdx, %rax
     movq %rax, %r12
-    testq $0x8000000000000000, %rax
+    testq 0x8000000000000000, %rax
     jz 8f
     leaq msg_bank(%rip), %rsi
     call print_string_asm
     movq %r13, %rdi
     call print_dec_asm
-    movb $'=', %al
+    movb '=', %al
     outb %al, %dx
-    movb $'0', %al
+    movb '0', %al
     outb %al, %dx
-    movb $'x', %al
+    movb 'x', %al
     outb %al, %dx
     movq %r12, %rdi
     call print_hex_asm
-    testq $0x2000000000000000, %r12
+    testq 0x2000000000000000, %r12
     jz 4f
     leaq msg_uc(%rip), %rsi
     call print_string_asm
@@ -106,17 +106,17 @@ machine_check_handler:
     leaq msg_corrected(%rip), %rsi
     call print_string_asm
 5:
-    testq $0x0400000000000000, %r12
+    testq 0x0400000000000000, %r12
     jz 6f
     leaq msg_pcc(%rip), %rsi
     call print_string_asm
 6:
     movq %r13, %rax
-    shlq $2, %rax
-    addq $0x402, %rax
+    shlq 2, %rax
+    addq 0x402, %rax
     movq %rax, %rcx
     rdmsr
-    shlq $32, %rdx
+    shlq 32, %rdx
     orq  %rdx, %rax
     testq %rax, %rax
     jz 7f
@@ -126,11 +126,11 @@ machine_check_handler:
     call print_hex_asm
 7:
     movq %r13, %rax
-    shlq $2, %rax
-    addq $0x403, %rax
+    shlq 2, %rax
+    addq 0x403, %rax
     movq %rax, %rcx
     rdmsr
-    shlq $32, %rdx
+    shlq 32, %rdx
     orq  %rdx, %rax
     testq %rax, %rax
     jz 8f
@@ -143,7 +143,7 @@ machine_check_handler:
     incq %r13
     jmp 3b
 9:
-    movq $0x17A, %rcx
+    movq 0x17A, %rcx
     xorq %rax, %rax
     xorq %rdx, %rdx
     wrmsr
@@ -162,7 +162,7 @@ machine_check_handler:
     popq %rcx
     popq %rax
     movq mc_saved_old_rsp(%rip), %rsp
-    testq $0x0400000000000000, %r15
+    testq 0x0400000000000000, %r15
     jnz 10f
     iretq
 10:
@@ -172,7 +172,7 @@ machine_check_handler:
     print_string_asm:
     pushq %rax
     pushq %rdx
-    movq $0x3F8, %rdx
+    movq 0x3F8, %rdx
     1: movb (%rsi), %al
     testb %al, %al
     jz 2f
@@ -187,15 +187,15 @@ machine_check_handler:
     pushq %rcx
     pushq %rdx
     pushq %rsi
-    movq $0x3F8, %rdx
-    movq $60, %rcx
+    movq 0x3F8, %rdx
+    movq 60, %rcx
     leaq hex_table(%rip), %rsi
     1: movq %rdi, %rax
     shrq %cl, %rax
-    andq $0xF, %rax
+    andq 0xF, %rax
     movb (%rsi, %rax), %al
     outb %al, %dx
-    subq $4, %rcx
+    subq 4, %rcx
     jge 1b
     popq %rsi
     popq %rdx
@@ -209,8 +209,8 @@ machine_check_handler:
     pushq %rdx
     pushq %rsi
     pushq %rdi
-    movq $0x3F8, %rdx
-    movq $10, %rcx
+    movq 0x3F8, %rdx
+    movq 10, %rcx
     xorq %rbx, %rbx
     1: xorq %rdx, %rdx
     divq %rcx
@@ -218,9 +218,9 @@ machine_check_handler:
     incq %rbx
     testq %rax, %rax
     jnz 1b
-    movq $0x3F8, %rdx
+    movq 0x3F8, %rdx
     2: popq %rax
-    addb $'0', %al
+    addb '0', %al
     outb %al, %dx
     decq %rbx
     jnz 2b
@@ -234,10 +234,10 @@ machine_check_handler:
     print_newline_asm:
     pushq %rax
     pushq %rdx
-    movq $0x3F8, %rdx
-    movb $'\r', %al
+    movq 0x3F8, %rdx
+    movb '\r', %al
     outb %al, %dx
-    movb $'\n', %al
+    movb '\n', %al
     outb %al, %dx
     popq %rdx
     popq %rax

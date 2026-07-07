@@ -23,10 +23,17 @@
 #include "UhciMouse.h"
 #include "UhciKeyboard.h"
 
+#define UHCI_LOW_MEMORY_BASE 0x10000
+#define UHCI_LOW_MEMORY_SIZE (32 * 1024 * 1024)
+
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
 #define PAGE_LARGE    (1ULL << 7)
 #define PAGE_HUGE     (1ULL << 7)
+
+#define KERNEL_POOL_BASE 0x10000
+#define KERNEL_POOL_PAGES EFI_SIZE_TO_PAGES(128 * 1024 * 1024)
+#define KERNEL_POOL_SIZE (KERNEL_POOL_PAGES * 4096)
 
 void* GopOut=NULL;
 HDR_PIXEL* GopBack=NULL;
@@ -39,6 +46,8 @@ EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop=NULL;
 EFI_GUID GopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 RegContext MainGlobalContext={0};
 
+u8* KernelStack = NULL;
+
 #define PAGE_SIZE_4KB  0x1000ULL
 #define PAGE_SIZE_2MB  0x200000ULL
 #define PAGE_SIZE_1GB  0x40000000ULL
@@ -48,6 +57,7 @@ RegContext MainGlobalContext={0};
 EFI_HANDLE ImageBase;
 
 AllocPool KernelPool = { .Head=NULL};
+AllocPool UHCILowMemoryPool = {0};
 
 void *USBMousePollTask(void *Arg) {
     USBMousePoll((USBMouse*)Arg);
@@ -59,7 +69,7 @@ void *USBKeyboardPollTask(void *Arg) {
     return Arg;
 }
 
-#pragma clang optimize off                                                      
+#pragma clang optimize off
 __attribute__((optnone))
 void SIMDInit(void) {
     unsigned long long cr4;
@@ -71,9 +81,9 @@ void SIMDInit(void) {
     __asm__ volatile ("xgetbv" : "=A"(xcr0) : "c"(0));
     MemFullFlash();
     xcr0 |= (1 << 1) | (1 << 2);
-    __asm__ volatile ("xsetbv" : : "c"(0), "A"(xcr0));                          
-    MemFullFlash();                                                                        
-}                                                                                               
+    __asm__ volatile ("xsetbv" : : "c"(0), "A"(xcr0));
+    MemFullFlash();
+}
 void FPUInit(void){
     u64 cr0;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
@@ -94,7 +104,6 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
     int use_l5 = IsLa57Supported();
 
     alloc_addr = 0xFFFFFFFF;
-    alloc_addr = 0xFFFFFFFF;
     if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) {
         DebugStr("AllocatePages failed!\n");
         return 0;
@@ -108,61 +117,20 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
         if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
         pml4 = (u64*)alloc_addr;
         for (int i = 0; i < 512; i++) pml4[i] = 0;
-        root_table[0] = ((u64)pml4 & ~0xFFFULL) | 0x003; 
+        root_table[0] = ((u64)pml4 & ~0xFFFULL) | 0x003;
     } else {
-        pml4 = root_table; 
-    }
-
-    alloc_addr = 0xFFFFFFFF;
-    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
-    u64* pdpt_0 = (u64*)alloc_addr;
-    for (int i = 0; i < 512; i++) pdpt_0[i] = 0;
-    pml4[0] = ((u64)pdpt_0 & ~0xFFFULL) | 0x003; 
-
-    alloc_addr = 0xFFFFFFFF;
-    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
-    u64* pd = (u64*)alloc_addr;
-    for (int i = 0; i < 512; i++) pd[i] = 0;
-    pdpt_0[0] = ((u64)pd & ~0xFFFULL) | 0x003; 
-
-    alloc_addr = 0xFFFFFFFF;
-    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
-    u64* pt = (u64*)alloc_addr;
-    for (int i = 0; i < 512; i++) pt[i] = 0;
-    pd[0] = ((u64)pt & ~0xFFFULL) | 0x003; 
-
-    for (u64 i = 1; i < 512; i++) {
-        u64 phys = i * 4096;
-        if (phys >= MaxPhysMem) break;
-        pt[i] = (phys >= 0xC8000000 && phys < 0xD0000000) ? (phys | 0x013) : (phys | 0x003);
-    }
-    
-    for (u64 i = 1; i < 512; i++) {
-        u64 phys = i * 2097152;
-        if (phys >= MaxPhysMem) break;
-        pd[i] = (phys >= 0xC8000000 && phys < 0xD0000000) ? (phys | 0x193) : (phys | 0x083);
+        pml4 = root_table;
     }
 
     u64 max_1gb_pages = (MaxPhysMem + 1073741824ULL - 1) / 1073741824ULL;
     if (max_1gb_pages > 512) max_1gb_pages = 512;
 
-    for (u64 i = 0; i < max_1gb_pages; i++) {
+    for (u64 i = 1; i < max_1gb_pages; i++) {
         u64 phys = i * 1073741824ULL;
-        if (i == 0) continue;
 
         u64 pml5_idx = phys / (1ULL << 48);
         u64 pml4_idx = (phys % (1ULL << 48)) / (1ULL << 39);
         u64 pdpt_idx = (phys % (1ULL << 39)) / 1073741824ULL;
-
-        if (phys >= 0x0DF0000000ULL && phys <= 0x0E10000000ULL) {
-            DebugStr("phys=");
-            DebugU64(phys);
-            DebugStr(" pml4_idx=");
-            DebugU64(pml4_idx);
-            DebugStr(" pdpt_idx=");
-            DebugU64(pdpt_idx);
-            DebugChar('\n');
-        }
 
         if (!use_l5 && phys >= (1ULL << 48)) break;
         if (pml5_idx >= 512) break;
@@ -188,12 +156,10 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
         }
         u64* cur_pdpt = (u64*)(active_pml4[pml4_idx] & ~0xFFFULL);
 
-        if (pml5_idx == 0 && pml4_idx == 0 && pdpt_idx == 0) continue;
-
         if (phys > PhysMem || phys > MaxPhysMem) {
-            cur_pdpt[pdpt_idx] = phys | 0x193; 
+            cur_pdpt[pdpt_idx] = phys | 0x193;
         } else {
-            cur_pdpt[pdpt_idx] = phys | 0x083; 
+            cur_pdpt[pdpt_idx] = phys | 0x083;
         }
     }
 
@@ -237,12 +203,14 @@ u64 GetXhciMmioBase() {
     return 0;
 }
 
-void InitPool(u64 PoolSize,void* Start){
+void InitPool(AllocPool* Pool, u64 PoolSize, void* Start){
+    if (!Pool || !Start) return;
     AllocBlock *block = (AllocBlock*)Start;
-    block->size=PoolSize - sizeof(AllocBlock);
-    block->is_free=1;
+    block->size = PoolSize - sizeof(AllocBlock);
+    block->is_free = 1;
     block->next = NULL;
-    KernelPool.Head = block;
+    block->prev = NULL;
+    Pool->Head = block;
 }
 
 void InitBlock(u64 PoolSize,u64 Pos){
@@ -258,7 +226,7 @@ void LoadDynamicPageTable(u64* root_table) {
 
     if (!IsLa57Supported()) {
         __asm__ volatile(
-            "movq %0, %%cr3\n\t" 
+            "movq %0, %%cr3\n\t"
             "movq %%cr3, %%rax\n\t"
             "jmp 1f\n\t"
             "1:\n\t"
@@ -269,9 +237,9 @@ void LoadDynamicPageTable(u64* root_table) {
 
     static u64 temporary_gdt[] = {
         0x0000000000000000,
-        0x00209a0000000000, 
-        0x00cf9a000000ffff, 
-        0x00cf92000000ffff  
+        0x00209a0000000000,
+        0x00cf9a000000ffff,
+        0x00cf92000000ffff
     };
 
     struct {
@@ -289,31 +257,31 @@ void LoadDynamicPageTable(u64* root_table) {
         "pushq $0x10\n\t"
         "pushq %%rax\n\t"
         "lretq\n\t"
-        
+
         ".code32\n\t"
         "1:\n\t"
         "movl $0x18, %%eax\n\t"
         "movl %%eax, %%ds\n\t"
         "movl %%eax, %%ss\n\t"
-        
+
         "movl %%cr0, %%eax\n\t"
         "btrl $31, %%eax\n\t"
         "movl %%eax, %%cr0\n\t"
-        
+
         "movl %%cr4, %%eax\n\t"
         "btsl $12, %%eax\n\t"
         "movl %%eax, %%cr4\n\t"
-        
+
         "movl %%ebx, %%cr3\n\t"
-        
+
         "movl %%cr0, %%eax\n\t"
         "btsl $31, %%eax\n\t"
         "movl %%eax, %%cr0\n\t"
-        
+
         "pushl $0x08\n\t"
         "pushl $2f\n\t"
         "lretl\n\t"
-        
+
         ".code64\n\t"
         "2:\n\t"
         "nop\n\t"
@@ -371,24 +339,24 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     FPUInit();
     DebugInit();
     InitClock();
-    
+
     EFI_LOADED_IMAGE_PROTOCOL *LoadedImage = NULL;
-    
+
     EFI_STATUS status = sys->BootServices->HandleProtocol(
-        image, 
-        (EFI_GUID *)&gEfiLoadedImageProtocolGuid, 
+        image,
+        (EFI_GUID *)&gEfiLoadedImageProtocolGuid,
         (void **)&LoadedImage
     );
 
     if (status == EFI_SUCCESS && LoadedImage != NULL) {
         u64 TrueImageBase = (u64)LoadedImage->ImageBase;
         u64 TrueImageSize = LoadedImage->ImageSize;
-        
+
         DebugStr("\r\n[NeuroSamaOS] UEFI LOADED IMAGE BASE: ");
         DebugU64(TrueImageBase);
         DebugStr("\r\n[NeuroSamaOS] IMAGE SIZE: ");
         DebugU64(TrueImageSize);
-        
+
     } else {
         DebugStr("\r\n[ERROR] HandleProtocol failed to fetch ImageBase! Code: ");
         DebugU64(status);
@@ -422,20 +390,26 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     UINTN EntryCount = MemoryMapSize / DescriptorSize;
     u64 MaxPhysicalAddress = 0;
     u64 MaxAvailableAddress = 0;
+    u64 LowAvailableAddress = 0;
 
     for (UINTN i = 0; i < EntryCount; i++) {
         EFI_MEMORY_DESCRIPTOR *desc = (EFI_MEMORY_DESCRIPTOR*)((u8*)MemMap + (i * DescriptorSize));
         u64 EndAddress = desc->PhysicalStart + (desc->NumberOfPages * 4096);
-        
+
         if (EndAddress > MaxPhysicalAddress) {
             MaxPhysicalAddress = EndAddress;
         }
-        
-        if (desc->Type == EfiConventionalMemory || 
+
+        if (desc->Type == EfiConventionalMemory ||
             desc->Type == EfiBootServicesData ||
             desc->Type == EfiRuntimeServicesData) {
             if (EndAddress > MaxAvailableAddress) {
                 MaxAvailableAddress = EndAddress;
+            }
+            if (desc->PhysicalStart < 0x100000000ULL && desc->PhysicalStart > 0x100000) {
+                if (LowAvailableAddress == 0 || desc->PhysicalStart < LowAvailableAddress) {
+                    LowAvailableAddress = desc->PhysicalStart;
+                }
             }
         }
     }
@@ -449,7 +423,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         if (EndAddress > RealMaxAddress) {
             RealMaxAddress = EndAddress;
         }
-        
+
         if (desc->Type == 11) {
             if (EndAddress > MaxMMIO) {
                 MaxMMIO = EndAddress;
@@ -473,27 +447,58 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         DebugStr("BuildDynamicPageTable failed!\n");
         while(1) __asm__ volatile("cli\n\t hlt");
     }
-    u8* KernelStack = NULL;
-    EFI_PHYSICAL_ADDRESS stack_alloc_addr = MaxAvailableAddress; 
+    
+    EFI_PHYSICAL_ADDRESS stack_alloc_addr = MaxAvailableAddress;
     status = bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, EFI_SIZE_TO_PAGES(128 * 1024 * 1024), &stack_alloc_addr);
     if (status != EFI_SUCCESS) {
         DebugStr("Allocate KernelStack failed!\n");
         while(1) __asm__ volatile("cli\n\t hlt");
     }
     KernelStack = (u8*)stack_alloc_addr;
+    
     DebugStr("InitPool.\n");
-    EFI_PHYSICAL_ADDRESS pool_alloc_addr = MaxAvailableAddress; 
-    status = bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, EFI_SIZE_TO_PAGES(128 * 1024 * 1024), &pool_alloc_addr);
+    
+    #define KERNEL_POOL_PAGES EFI_SIZE_TO_PAGES(1024 * 1024 * 1024)  
+    #define KERNEL_POOL_SIZE (KERNEL_POOL_PAGES * 4096)
+    
+    EFI_PHYSICAL_ADDRESS pool_alloc_addr = 0;
+    u64 try_addresses[] = {0x100000, 0x200000, 0x300000, 0x400000, 0x500000, 0x600000, 0x700000, 0x800000, 0x900000, 0xA00000, 0xB00000, 0xC00000, 0xD00000, 0xE00000, 0xF00000, 0x1000000};
+    int tried = 0;
+    int max_tries = sizeof(try_addresses) / sizeof(u64);
+    
+    for (tried = 0; tried < max_tries; tried++) {
+        pool_alloc_addr = try_addresses[tried];
+        DebugStr("Trying to allocate at 0x");
+        DebugU64(pool_alloc_addr);
+        DebugStr("\n");
+        
+        status = bs->AllocatePages(AllocateAddress, EfiRuntimeServicesData, KERNEL_POOL_PAGES, &pool_alloc_addr);
+        if (status == EFI_SUCCESS) {
+            DebugStr("Successfully allocated at 0x");
+            DebugU64(pool_alloc_addr);
+            DebugStr("\n");
+            break;
+        }
+    }
+    
     if (status != EFI_SUCCESS) {
-        DebugStr("Allocate KernelPool failed!\n");
-        while(1) __asm__ volatile("cli\n\t hlt");
+        DebugStr("All low memory allocation failed! Using fallback...\n");
+        pool_alloc_addr = MaxAvailableAddress;
+        status = bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, KERNEL_POOL_PAGES, &pool_alloc_addr);
+        if (status != EFI_SUCCESS) {
+            DebugStr("Allocate KernelPool failed!\n");
+            while(1) __asm__ volatile("cli\n\t hlt");
+        }
+        DebugStr("Fallback allocated at 0x");
+        DebugU64(pool_alloc_addr);
+        DebugStr("\n");
     }
-    u64 PoolSize = 0x40000000;
-    if (pool_alloc_addr + PoolSize > MaxPhysicalAddress) {
-        PoolSize = MaxPhysicalAddress - pool_alloc_addr;
-    }
-    InitPool(PoolSize,pool_alloc_addr);
-    DebugStr("ExitBootServices.\n");
+    
+    InitPool(&KernelPool, KERNEL_POOL_SIZE, (void*)pool_alloc_addr);
+    DebugStr("KernelPool initialized at 0x");
+    DebugU64((u64)KernelPool.Head);
+    DebugStr("\n");
+    
     DebugStr("ExitBootServices.\n");
     ExitBootServices_Safe(image);
     __asm__ volatile("cli\n\t");
@@ -512,7 +517,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
 
     LoadGDT();
     InitIDT();
-    
+
     __asm__ volatile(
         "call kernel_main\n\t"
         :
@@ -553,7 +558,26 @@ void OnPortChange(u8 port, u16 status)
 
 __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("Jumped To KernelMain.\n");
-    GopMode.FrameBufferSize=GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
+    
+    if (!KernelPool.Head) {
+        DebugStr("ERROR: KernelPool.Head is NULL!\n");
+        while(1) __asm__ volatile("cli\n\t hlt");
+    }
+    
+    DebugStr("KernelPool.Head at 0x");
+    DebugU64((u64)KernelPool.Head);
+    DebugStr(" size: ");
+    DebugU64(KernelPool.Head->size);
+    DebugStr(" is_free: ");
+    DebugU8(KernelPool.Head->is_free);
+    DebugStr("\n");
+
+    if (!GopBack) {
+        DebugStr("ERROR: GopBack is NULL!\n");
+        while(1) __asm__ volatile("cli\n\t hlt");
+    }
+    
+    GopMode.FrameBufferSize = GopInfo.PixelsPerScanLine * GopInfo.VerticalResolution * sizeof(HDR_PIXEL);
     DebugStr("GopBack = ");
     DebugU64((u64)GopBack);
     DebugChar('\n');
@@ -572,11 +596,11 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("PixelFormat = ");
     DebugU32(GopInfo.PixelFormat);
     DebugChar('\n');
-    
+
     DebugStr("Init ATA.\n");
     ATAInit();
     DebugStr("ATA Init Done.\n");
-    
+
     u32 esp_count = GPTGetESPCount();
     DebugStr("ESP count: ");
     DebugU32(esp_count);
@@ -596,7 +620,7 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
             DebugChar('\n');
         }
     }
-    
+
     DebugStr("If in QEMU,All int 0xD Bug is QEMU Bug,Not Kernel:\nInit GTX960.\n");
     NvidiaGPU GPU={0};
     if (PCIFindNvidiaGPU(&GPU)) {
@@ -610,6 +634,7 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     }
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
     DebugStr("Init UHCI.\n");
+
     UHCIHostController *hc = NULL;
     UHCIContext *ctx = NULL;
     USBMouse* UhciMouse = NULL;
@@ -618,27 +643,70 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     u8 Bus = 0xFF, Dev = 0xFF, Func = 0xFF;
     PCIFindDeviceByClass(UHCI_CLASS_CODE, UHCI_SUBCLASS, UHCI_INTERFACE, &Bus, &Dev, &Func);
     if (Dev != 0xFF) {
+        DebugStr("Found USB controller: Bus=0x");
+        DebugU8(Bus);
+        DebugStr(" Dev=0x");
+        DebugU8(Dev);
+        DebugStr(" Func=0x");
+        DebugU8(Func);
+        DebugStr("\n");
+
         u16 pci_cmd = PCIReadWORD(Bus, Dev, Func, 0x04);
         pci_cmd |= (1 << 0) | (1 << 1) | (1 << 2);
         PCIWriteWORD(Bus, Dev, Func, 0x04, pci_cmd);
-        
+
         DebugStr("PCI Command Region Activated. Command: 0x");
         DebugU16(PCIReadWORD(Bus, Dev, Func, 0x04));
         DebugChar('\n');
 
         hc = UHCICreate(Bus, Dev, Func, &KernelPool);
-        if (!hc) goto uhci_end;
+        if (!hc) {
+            DebugStr("UHCICreate failed!\n");
+            goto uhci_end;
+        }
+        DebugStr("UHCICreate succeeded. IOBase=0x");
+        DebugU16(hc->IOBase);
+        DebugStr("\n");
 
-        ctx = Alloc(&KernelPool, sizeof(UHCIContext));
-        if (!ctx) goto uhci_end;
+        hc->MemoryPool = &KernelPool;
+        DebugStr("hc->MemoryPool = 0x");
+        DebugU64((u64)hc->MemoryPool);
+        DebugStr("\n");
+
+        ctx = MaxAlloc(&KernelPool, sizeof(UHCIContext), UHCI_MAX_ADDRESS);
+        if (!ctx) {
+            DebugStr("Context MaxAlloc failed!\n");
+            goto uhci_end;
+        }
+        DebugStr("Context allocated at 0x");
+        DebugU64((u64)ctx);
+        DebugStr("\n");
+
         MemSet(ctx, 0, sizeof(UHCIContext));
         ctx->HC = hc;
         ctx->MemoryPool = &KernelPool;
+        ctx->HC->MemoryPool = &KernelPool;
+        
+        DebugStr("ctx->MemoryPool = 0x");
+        DebugU64((u64)ctx->MemoryPool);
+        DebugStr("\n");
+        DebugStr("ctx->HC->MemoryPool = 0x");
+        DebugU64((u64)ctx->HC->MemoryPool);
+        DebugStr("\n");
+        
         ctx->HandleCompletion = OnRequestComplete;
         ctx->HandleError = OnRequestError;
         ctx->HandlePortChange = OnPortChange;
 
-        if (UHCIInitialize(ctx) != UHCI_OK) goto uhci_end;
+        DebugStr("Calling UHCIInitialize...\n");
+        UHCIResult initResult = UHCIInitialize(ctx);
+        if (initResult != UHCI_OK) {
+            DebugStr("UHCIInitialize failed with code: ");
+            DebugI64(initResult);
+            DebugStr("\n");
+            goto uhci_end;
+        }
+        DebugStr("UHCIInitialize succeeded\n");
 
         UHCIConfigure(ctx, 64, 0);
         UHCIStart(ctx);
@@ -681,9 +749,13 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
                     if (!UhciMouse) {
                         DebugStr("Not a Mouse. re-resetting port for Keyboard...\r\n");
                         UHCIResetPort(ctx, p);
+                        DebugStr("Ms100\r\n");
                         SystemBusySleepMs(100);
+                        DebugStr("EnablePort\r\n");
                         UHCIEnablePort(ctx, p);
+                        DebugStr("Ms100\r\n");
                         SystemBusySleepMs(100);
+                        DebugStr("GetPortStatus\r\n");
                         if (UHCIGetPortStatus(ctx, p) & UHCI_PORTSC_PE) {
                             UhciKeyboard = USBKeyboardInit(ctx, p);
                             if (UhciKeyboard) {
@@ -700,10 +772,12 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         }
     }
 
-    uhci_end:
+uhci_end:
     if (!ctx) DebugStr("UHCI init failed.\n");
     else DebugStr("UHCI initialization completed.\r\n");
-    
+    if (!UhciKeyboard) DebugStr("No UhciKeyboard\n");
+    if (!UhciMouse) DebugStr("No UhciMouse\n");
+
     DebugStr("Loop.\n");
     u8 prevModifiers = 0;
     u8 prevKeys[6] = {0};

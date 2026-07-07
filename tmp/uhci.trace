@@ -1,0 +1,15 @@
+usb_uhci_td_start*
+usb_uhci_td_result*
+usb_uhci_td_complete*
+usb_uhci_frame*
+usb_uhci_qh*
+usb_uhci_port*
+usb_uhci_*cmd*
+usb_uhci_*reset*
+usb_uhci_*irq*
+usb_*setup*
+usb_*ctrl*
+usb_*transfer*
+usb_*packet*
+usb_*device*
+usb_*port*

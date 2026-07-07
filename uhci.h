@@ -106,6 +106,8 @@
 #define UHCI_RECLAIM_32 0
 #define UHCI_RECLAIM_64 1
 
+#define UHCI_MAX_ADDRESS 0x100000000ULL
+
 typedef enum
 {
     UHCI_OK = 0,
@@ -166,7 +168,7 @@ typedef struct __attribute__((aligned(16))) UHCITransferDescriptor
     u32 Token;
     u32 BufferPointer;
     u32 Reserved[4];
-} UHCITransferDescriptor;
+}__attribute__((aligned(16))) UHCITransferDescriptor;
 
 typedef struct __attribute__((aligned(16))) UHCIQueueHead
 {
@@ -217,6 +219,7 @@ typedef struct UHCIRequest
     u32 DataPhys;
     u32 TDPhys;
     u32 QHPhys;
+    u16 FrameIndex;
     UHCIContext *UHCI;
 } UHCIRequest;
 
@@ -225,6 +228,7 @@ typedef struct UHCIContext
     UHCIHostController *HC;
     UHCIRequest *PendingRequests;
     UHCIRequest *CompletedRequests;
+    UHCIRequest *CompletedRequestsTail;
     UHCIRequest *FreeRequests;
     AllocPool *MemoryPool;
     UHCIFrameListEntry *FrameList;
@@ -241,6 +245,7 @@ typedef struct UHCIContext
     void (*HandleError)(UHCIRequest *req, UHCIResult error);
     void (*HandlePortChange)(u8 port, u16 status);
     u32 TSCPerMs;
+    u8 IsPolling;
 } UHCIContext;
 
 typedef struct {
@@ -293,11 +298,6 @@ typedef struct
     u8 iInterface;
 } __attribute__((packed)) USBInterfaceDescriptor;
 
-typedef struct {
-    UHCIQueueHead qh;
-    UHCITransferDescriptor tds[3];
-} USBControlQueue;
-
 UHCIHostController *UHCICreate(u8 Bus, u8 Slot, u8 Func, AllocPool *Pool);
 UHCIResult UHCIInitialize(UHCIContext *ctx);
 UHCIResult UHCIStart(UHCIContext *ctx);
@@ -322,3 +322,5 @@ UHCIResult UHCIClearPortChange(UHCIContext *ctx, u8 Port);
 void UHCIDumpStatus(UHCIContext *ctx);
 void UHCIDumpRequests(UHCIContext *ctx);
 void UHCIDumpFrameList(UHCIContext *ctx, u16 start, u16 count);
+void UHCIClearFrameListEntry(UHCIContext* ctx, UHCIQueueHead* qh);
+UHCIResult ExecuteControlTransfer(UHCIContext *ctx, u8 devAddr, u8 endpoint, u8 *setupPacket, u16 setupLen, u8 *data, u16 dataLen, u8 dir, u8 is_low_speed, u16 maxPacketSize);
