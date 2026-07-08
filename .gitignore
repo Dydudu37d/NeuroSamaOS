@@ -14,4 +14,5 @@ disk/
 *.img
 *.exe
 *.lib
-
+*.log
+tmp/*
