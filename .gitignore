@@ -16,3 +16,4 @@ disk/
 *.lib
 *.log
 tmp/*
+tmp/
