@@ -140,19 +140,7 @@ __attribute__((force_align_arg_pointer)) __attribute__((aligned(16))) static inl
         if (rowSize >= 32 && ((u64)(GopBack + offset) & 31) == 0 && (rowSize & 31) == 0) {
             size_t loops = rowSize / 32;
             HDR_PIXEL* dst = GopBack + offset;
-            __asm__ __volatile__(
-                "vpbroadcastq %2, %%ymm0\n\t"
-                "1:\n\t"
-                "vmovntdq %%ymm0, (%0)\n\t"
-                "addq $32, %0\n\t"
-                "decq %1\n\t"
-                "jnz 1b\n\t"
-                "vzeroupper\n\t"
-                "sfence"
-                : "+r"(dst), "+r"(loops)
-                : "r"(hdr)
-                : "ymm0", "memory"
-            );
+            MemSet64(dst,hdr,endX-startX);
         } else {
             for (u32 x = startX; x < endX; x++) {
                 GopBack[offset + (x - startX)] = hdr;

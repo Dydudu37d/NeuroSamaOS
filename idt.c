@@ -87,6 +87,15 @@ u8 get_instruction_length(u64 rip) {
     if (op == 0x0F) {
         is_two_byte = 1;
         op = p[len++];
+        if (op == 0x30) {
+            return len;
+        }
+        if (op == 0x31) {
+            return len;
+        }
+        if (op == 0x32) {
+            return len;
+        }
         if (op == 0x38 || op == 0x3A) {
             u8 op3 = p[len++];
             has_modrm = 1;

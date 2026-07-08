@@ -2,10 +2,6 @@
 
 #include "uhci.h"
 
-#define USB_REQ_GET_DESCRIPTOR   0x06
-#define USB_REQ_SET_CONFIG       0x09
-#define USB_REQ_SET_PROTOCOL     0x0B
-
 #define USB_MOUSE_REPORT_SIZE 4
 
 typedef struct {

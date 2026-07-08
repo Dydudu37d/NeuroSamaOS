@@ -596,6 +596,10 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("PixelFormat = ");
     DebugU32(GopInfo.PixelFormat);
     DebugChar('\n');
+    MemFullFlash();
+    GOPClear(HDR_Pack(0,0,0,0));
+    GOPRectFill((u32[2]){0,100},(u32[2]){0,100},HDR_Pack(0xFFFF,0xFFFF,0x0000,0xFFFF));
+    GOPFlash();
 
     DebugStr("Init ATA.\n");
     ATAInit();
@@ -634,12 +638,10 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     }
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
     DebugStr("Init UHCI.\n");
-
     UHCIHostController *hc = NULL;
     UHCIContext *ctx = NULL;
     USBMouse* UhciMouse = NULL;
     USBKeyboard* UhciKeyboard = NULL;
-
     u8 Bus = 0xFF, Dev = 0xFF, Func = 0xFF;
     PCIFindDeviceByClass(UHCI_CLASS_CODE, UHCI_SUBCLASS, UHCI_INTERFACE, &Bus, &Dev, &Func);
     if (Dev != 0xFF) {
@@ -650,15 +652,12 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr(" Func=0x");
         DebugU8(Func);
         DebugStr("\n");
-
         u16 pci_cmd = PCIReadWORD(Bus, Dev, Func, 0x04);
         pci_cmd |= (1 << 0) | (1 << 1) | (1 << 2);
         PCIWriteWORD(Bus, Dev, Func, 0x04, pci_cmd);
-
         DebugStr("PCI Command Region Activated. Command: 0x");
         DebugU16(PCIReadWORD(Bus, Dev, Func, 0x04));
         DebugChar('\n');
-
         hc = UHCICreate(Bus, Dev, Func, &KernelPool);
         if (!hc) {
             DebugStr("UHCICreate failed!\n");
@@ -667,12 +666,10 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("UHCICreate succeeded. IOBase=0x");
         DebugU16(hc->IOBase);
         DebugStr("\n");
-
         hc->MemoryPool = &KernelPool;
         DebugStr("hc->MemoryPool = 0x");
         DebugU64((u64)hc->MemoryPool);
         DebugStr("\n");
-
         ctx = MaxAlloc(&KernelPool, sizeof(UHCIContext), UHCI_MAX_ADDRESS);
         if (!ctx) {
             DebugStr("Context MaxAlloc failed!\n");
@@ -681,23 +678,19 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("Context allocated at 0x");
         DebugU64((u64)ctx);
         DebugStr("\n");
-
         MemSet(ctx, 0, sizeof(UHCIContext));
         ctx->HC = hc;
         ctx->MemoryPool = &KernelPool;
         ctx->HC->MemoryPool = &KernelPool;
-        
         DebugStr("ctx->MemoryPool = 0x");
         DebugU64((u64)ctx->MemoryPool);
         DebugStr("\n");
         DebugStr("ctx->HC->MemoryPool = 0x");
         DebugU64((u64)ctx->HC->MemoryPool);
         DebugStr("\n");
-        
         ctx->HandleCompletion = OnRequestComplete;
         ctx->HandleError = OnRequestError;
         ctx->HandlePortChange = OnPortChange;
-
         DebugStr("Calling UHCIInitialize...\n");
         UHCIResult initResult = UHCIInitialize(ctx);
         if (initResult != UHCI_OK) {
@@ -707,60 +700,54 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
             goto uhci_end;
         }
         DebugStr("UHCIInitialize succeeded\n");
-
         UHCIConfigure(ctx, 64, 0);
         UHCIStart(ctx);
         UHCIDumpStatus(ctx);
         DebugStr("UHCI started. Checking ports...\r\n");
         SystemBusySleepMs(300);
-
         for (u8 p = 0; p < 2; p++) {
             DebugStr("Port ");
             DebugU8(p);
             DebugStr(" initial status: 0x");
             DebugU16(UHCIGetPortStatus(ctx, p));
             DebugStr("\r\n");
-
             UHCIClearPortChange(ctx, p);
             SystemBusySleepMs(50);
-
             u16 status = UHCIGetPortStatus(ctx, p);
             if (status & UHCI_PORTSC_CCS) {
                 DebugStr("Device detected on port ");
                 DebugU8(p);
                 DebugStr(" -> Resetting...\r\n");
-
                 UHCIResetPort(ctx, p);
                 SystemBusySleepMs(100);
                 UHCIEnablePort(ctx, p);
                 SystemBusySleepMs(100);
-
                 status = UHCIGetPortStatus(ctx, p);
                 DebugStr("After reset status: 0x");
                 DebugU16(status);
                 DebugStr("\r\n");
-
                 if (status & UHCI_PORTSC_PE) {
-                    DebugStr("Port enabled successfully!\r\n");
+                    DebugStr("Trying Mouse on port ");
+                    DebugU8(p);
+                    DebugStr("\n");
+
                     UhciMouse = USBMouseInit(ctx, p);
                     if (UhciMouse) {
+                        DebugStr("Mouse success on port ");
+                        DebugU8(p);
+                        DebugStr("\n");
                         TaskAdd((Task){.Active=1, .Arg=UhciMouse, .CallFunc=USBMousePollTask, .Name="UhciMouse", .IntervalNs=10000000}, 1);
-                    }
-                    if (!UhciMouse) {
-                        DebugStr("Not a Mouse. re-resetting port for Keyboard...\r\n");
-                        UHCIResetPort(ctx, p);
-                        DebugStr("Ms100\r\n");
-                        SystemBusySleepMs(100);
-                        DebugStr("EnablePort\r\n");
-                        UHCIEnablePort(ctx, p);
-                        DebugStr("Ms100\r\n");
-                        SystemBusySleepMs(100);
-                        DebugStr("GetPortStatus\r\n");
-                        if (UHCIGetPortStatus(ctx, p) & UHCI_PORTSC_PE) {
-                            UhciKeyboard = USBKeyboardInit(ctx, p);
-                            if (UhciKeyboard) {
-                                TaskAdd((Task){.Active=1, .Arg=UhciKeyboard, .CallFunc=USBKeyboardPollTask, .Name="UhciKeyboard", .IntervalNs=10000000}, 1);
-                            }
+                    } else {
+                        DebugStr("Mouse failed on port ");
+                        DebugU8(p);
+                        DebugStr(", trying Keyboard...\n");
+
+                        UhciKeyboard = USBKeyboardInit(ctx, p);
+                        if (UhciKeyboard) {
+                            DebugStr("Keyboard success on port ");
+                            DebugU8(p);
+                            DebugStr("\n");
+                            TaskAdd((Task){.Active=1, .Arg=UhciKeyboard, .CallFunc=USBKeyboardPollTask, .Name="UhciKeyboard", .IntervalNs=10000000}, 1);
                         }
                     }
                 }
@@ -771,7 +758,6 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
             }
         }
     }
-
 uhci_end:
     if (!ctx) DebugStr("UHCI init failed.\n");
     else DebugStr("UHCI initialization completed.\r\n");
