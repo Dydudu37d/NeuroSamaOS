@@ -3,13 +3,14 @@
 #include "kmalloc.h"
 #include "str.h"
 
+const char map[] = "abcdefghijklmnopqrstuvwxyz1234567890\n";
+
 extern AllocPool KernelPool;
 
 static void XhciRingEpDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId) {
     volatile u32* db = (volatile u32*)(Xhci->DoorbellBase + (SlotId * 4));
     *db = EpId;
 }
-
 static u8 UsbCtrlTransfer(XhciController* Xhci, u8 SlotId, u8 bmReqType, u8 bReq,
                           u16 wValue, u16 wIndex, u16 wLength, void* Data) {
     XhciDeviceContext* devCtx = (XhciDeviceContext*)Xhci->Dcbaa->DevCtxPtr[SlotId];
@@ -101,21 +102,29 @@ static u8 UsbSetIdle(XhciController* Xhci, u8 SlotId, u8 Iface, u8 Duration, u8 
                            USB_REQ_SET_IDLE, (Duration << 8) | ReportId, Iface, 0, 0);
 }
 
-static void KeyboardQueueTransfer(XhciController* Xhci, KeyboardDevice* Kbd) {
-    XhciDeviceContext* devCtx = (XhciDeviceContext*)Xhci->Dcbaa->DevCtxPtr[Kbd->SlotId];
-    u32 epIdx = Kbd->EpIn;
-    u64 deq = devCtx->Ep[epIdx - 1].DequeueLow | ((u64)devCtx->Ep[epIdx - 1].DequeueHigh << 32);
-    XhciTrb* ring = (XhciTrb*)(deq & ~0xF);
+void KeyboardQueueTransfer(XhciController* Xhci, KeyboardDevice* Kbd) {
+    u32 idx = Kbd->Enqueue;
+    u64 bufferPhys = (u64)Kbd->ReportBuffer;
 
-    u8* buf = (u8*)AlignedAlloc(&KernelPool, Kbd->MaxPacketSize, 64);
-    MemSet(buf, 0, Kbd->MaxPacketSize);
+    Kbd->KbdRing[idx].ParameterLow = (u32)(bufferPhys & 0xFFFFFFFF);
+    Kbd->KbdRing[idx].ParameterHigh = (u32)(bufferPhys >> 32);
+    Kbd->KbdRing[idx].Status = Kbd->MaxPacketSize;
+    Kbd->KbdRing[idx].Control = (XHCI_TRB_NORMAL << 10) | XHCI_TRB_IOC | Kbd->Ccs;
 
-    ring[0].ParameterLow = (u32)((u64)buf & 0xFFFFFFFF);
-    ring[0].ParameterHigh = (u32)((u64)buf >> 32);
-    ring[0].Status = Kbd->MaxPacketSize;
-    ring[0].Control = (XHCI_TRB_NORMAL << 10) | XHCI_TRB_IOC | 1;
+    Kbd->Enqueue++;
+    if (Kbd->Enqueue >= 63) {
+        XhciTrb* link = &Kbd->KbdRing[Kbd->Enqueue];
+        link->ParameterLow = (u32)((u64)Kbd->KbdRing & 0xFFFFFFFF);
+        link->ParameterHigh = (u32)((u64)Kbd->KbdRing >> 32);
+        link->Status = 0;
+        link->Control = (XHCI_TRB_LINK << 10) | (1 << 1) | Kbd->Ccs;
+        
+        Kbd->Enqueue = 0;
+        Kbd->Ccs ^= 1;
+    }
 
-    XhciRingEpDoorbell(Xhci, Kbd->SlotId, epIdx);
+    u8 dci = (Kbd->EpIn * 2) + 1;
+    XhciRingEpDoorbell(Xhci, Kbd->SlotId, dci);
 }
 
 static u8 ParseConfig(u8* Cfg, u16 TotalLen, u8* OutEp, u16* OutMaxPkt) {
@@ -157,58 +166,22 @@ KeyboardDevice* KeyboardInit(XhciController* Xhci) {
 
     for (u8 slot = 1; slot <= maxSlots; slot++) {
         XhciDeviceContext* devCtx = (XhciDeviceContext*)Xhci->Dcbaa->DevCtxPtr[slot];
-        if (!devCtx) {
-            continue;
-        }
+        if (!devCtx) continue;
 
         u8 desc[18];
-        if (!UsbGetDescriptor(Xhci, slot, USB_DT_DEVICE, desc, 18)) {
-            continue;
-        }
+        if (!UsbGetDescriptor(Xhci, slot, USB_DT_DEVICE, desc, 18)) continue;
 
         u8 cfgBuf[256];
-        if (!UsbGetDescriptor(Xhci, slot, USB_DT_CONFIG, cfgBuf, 9)) {
-            continue;
-        }
+        if (!UsbGetDescriptor(Xhci, slot, USB_DT_CONFIG, cfgBuf, 9)) continue;
 
         u16 totalLen = *(u16*)(cfgBuf + 2);
-        if (!UsbGetDescriptor(Xhci, slot, USB_DT_CONFIG, cfgBuf, totalLen)) {
-            continue;
-        }
+        if (!UsbGetDescriptor(Xhci, slot, USB_DT_CONFIG, cfgBuf, totalLen)) continue;
 
         u8 ep = 0;
         u16 maxPkt = 0;
         if (ParseConfig(cfgBuf, totalLen, &ep, &maxPkt)) {
-            if (!UsbSetConfig(Xhci, slot, cfgBuf[5])) {
-                continue;
-            }
-
-            if (!UsbSetIdle(Xhci, slot, 0, 0, 0)) {
-                continue;
-            }
-
-            XhciInputContext* inputCtx = (XhciInputContext*)AlignedAlloc(&KernelPool, sizeof(XhciInputContext), 64);
-            MemSet(inputCtx, 0, sizeof(XhciInputContext));
-            inputCtx->InputCtrl.AddFlags = (1 << (ep + 1));
-            
-            XhciTrb* epRing = (XhciTrb*)AlignedAlloc(&KernelPool, sizeof(XhciTrb) * 64, 64);
-            MemSet(epRing, 0, sizeof(XhciTrb) * 64);
-            
-            inputCtx->Ep[ep - 1].DequeueLow = (u32)((u64)epRing & 0xFFFFFFFF) | 1;
-            inputCtx->Ep[ep - 1].DequeueHigh = (u32)((u64)epRing >> 32);
-            inputCtx->Ep[ep - 1].EpInfo2 = (maxPkt << 16) | (3 << 3) | 3;
-
-            XhciSendCommand(Xhci, (u64)inputCtx, 0, XHCI_TRB_CONFIGURE_ENDPOINT, slot);
-            
-            XhciTrb ev;
-            while (1) {
-                if (XhciReadEvent(Xhci, &ev)) {
-                    u8 type = (ev.Control >> 10) & 0x3F;
-                    if (type == XHCI_TRB_COMMAND_COMPLETE) {
-                        break;
-                    }
-                }
-            }
+            if (!UsbSetConfig(Xhci, slot, cfgBuf[5])) continue;
+            if (!UsbSetIdle(Xhci, slot, 0, 0, 0)) continue;
 
             KeyboardDevice* kbd = (KeyboardDevice*)Alloc(&KernelPool, sizeof(KeyboardDevice));
             MemSet(kbd, 0, sizeof(KeyboardDevice));
@@ -216,6 +189,31 @@ KeyboardDevice* KeyboardInit(XhciController* Xhci) {
             kbd->EpIn = ep;
             kbd->MaxPacketSize = maxPkt;
             kbd->Xhci = Xhci;
+            kbd->Ccs = 1;
+            kbd->Enqueue = 0;
+
+            XhciInputContext* inputCtx = (XhciInputContext*)AlignedAlloc(&KernelPool, sizeof(XhciInputContext), 64);
+            MemSet(inputCtx, 0, sizeof(XhciInputContext));
+            
+            u8 dci = (ep * 2) + 1;
+            u8 epIdx = dci - 1;
+
+            inputCtx->InputCtrl.AddFlags = (1 << dci);
+            
+            u64 ringPhys = (u64)kbd->KbdRing;
+            inputCtx->Ep[epIdx].DequeueLow = (u32)(ringPhys & 0xFFFFFFFF) | 1;
+            inputCtx->Ep[epIdx].DequeueHigh = (u32)(ringPhys >> 32);
+            inputCtx->Ep[epIdx].EpInfo2 = (maxPkt << 16) | (3 << 3) | 3;
+
+            XhciSendCommand(Xhci, (u64)inputCtx, 0, XHCI_TRB_CONFIGURE_ENDPOINT, slot);
+            
+            XhciTrb ev;
+            while (1) {
+                if (XhciReadEvent(Xhci, &ev) && ((ev.Control >> 10) & 0x3F) == XHCI_TRB_COMMAND_COMPLETE) {
+                    break;
+                }
+            }
+            Free(&KernelPool, inputCtx);
 
             KeyboardQueueTransfer(Xhci, kbd);
             return kbd;
@@ -224,48 +222,23 @@ KeyboardDevice* KeyboardInit(XhciController* Xhci) {
     return 0;
 }
 
-void KeyboardPoll(KeyboardDevice* Kbd) {
+// ✨ 新增公有接口：提供給 xhci.c 的大總管直接分發掃描碼，徹底避免搶奪 EventRing
+void KeyboardPushScancode(KeyboardDevice* Kbd, u8 Scancode) {
     if (!Kbd) return;
 
-    XhciController* xhci = Kbd->Xhci;
-    if (!xhci) return;
+    if (Scancode >= 4 && Scancode <= 0x65) {
+        u8 ascii = 0;
+        if (Scancode >= 4 && Scancode <= 38) {
+            ascii = map[Scancode - 4];
+        } else if (Scancode == 40) {
+            ascii = '\n';
+        }
 
-    XhciTrb ev;
-    if (XhciReadEvent(xhci, &ev)) {
-        u8 type = (ev.Control >> 10) & 0x3F;
-        if (type == XHCI_TRB_TRANSFER_EVENT) {
-            u8 code = (ev.Status >> 24) & 0xFF;
-            u8 slotId = (ev.Control >> 24) & 0xFF;
-            
-            if (slotId == Kbd->SlotId && code == XHCI_CMPLT_SUCCESS) {
-                XhciDeviceContext* devCtx = (XhciDeviceContext*)xhci->Dcbaa->DevCtxPtr[Kbd->SlotId];
-                u32 epIdx = Kbd->EpIn;
-                u64 deq = devCtx->Ep[epIdx - 1].DequeueLow | ((u64)devCtx->Ep[epIdx - 1].DequeueHigh << 32);
-                XhciTrb* ring = (XhciTrb*)(deq & ~0xF);
-                u8* report = (u8*)((u64)ring[0].ParameterLow | ((u64)ring[0].ParameterHigh << 32));
-
-                if (report && (report[2] || report[3] || report[4])) {
-                    u8 scancode = report[2];
-                    if (scancode >= 4 && scancode <= 0x65) {
-                        const char map[] = "abcdefghijklmnopqrstuvwxyz1234567890\n";
-                        u8 ascii = 0;
-                        if (scancode >= 4 && scancode <= 38) {
-                            ascii = map[scancode - 4];
-                        } else if (scancode == 40) {
-                            ascii = '\n';
-                        }
-
-                        if (ascii) {
-                            u8 next = (Kbd->WritePos + 1) % KEY_BUFFER_SIZE;
-                            if (next != Kbd->ReadPos) {
-                                Kbd->Buffer[Kbd->WritePos] = ascii;
-                                Kbd->WritePos = next;
-                            }
-                        }
-                    }
-                }
-                Free(&KernelPool, report);
-                KeyboardQueueTransfer(xhci, Kbd);
+        if (ascii) {
+            u8 next = (Kbd->WritePos + 1) % KEY_BUFFER_SIZE;
+            if (next != Kbd->ReadPos) {
+                Kbd->Buffer[Kbd->WritePos] = ascii;
+                Kbd->WritePos = next;
             }
         }
     }

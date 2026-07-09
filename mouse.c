@@ -4,7 +4,6 @@
 #include "str.h"
 
 extern AllocPool KernelPool;
-static MouseDevice* ActiveMouse = 0;
 
 static void XhciRingEpDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId) {
     volatile u32* db = (volatile u32*)(Xhci->DoorbellBase + (SlotId * 4));
@@ -105,12 +104,13 @@ static void MouseSetupEndpoint(XhciController* Xhci, MouseDevice* Mouse) {
     XhciInputContext* inputCtx = (XhciInputContext*)AlignedAlloc(&KernelPool, sizeof(XhciInputContext), 64);
     MemSet(inputCtx, 0, sizeof(XhciInputContext));
 
-    u8 ep = Mouse->EpIn;
-    inputCtx->InputCtrl.AddFlags = (1 << (ep + 1));
+    u8 dci = (Mouse->EpIn * 2) + 1; 
+    u8 epIdx = dci - 1;
+    inputCtx->InputCtrl.AddFlags = (1 << dci);
 
-    inputCtx->Ep[ep - 1].DequeueLow = (u32)(Mouse->TrbRingPhys & 0xFFFFFFFF) | 1;
-    inputCtx->Ep[ep - 1].DequeueHigh = (u32)(Mouse->TrbRingPhys >> 32);
-    inputCtx->Ep[ep - 1].EpInfo2 = (Mouse->MaxPacketSize << 16) | (3 << 3) | 3;
+    inputCtx->Ep[epIdx].DequeueLow = (u32)(Mouse->TrbRingPhys & 0xFFFFFFFF) | 1;
+    inputCtx->Ep[epIdx].DequeueHigh = (u32)(Mouse->TrbRingPhys >> 32);
+    inputCtx->Ep[epIdx].EpInfo2 = (Mouse->MaxPacketSize << 16) | (3 << 3) | 3;
 
     XhciSendCommand(Xhci, (u64)inputCtx, 0, XHCI_TRB_CONFIGURE_ENDPOINT, Mouse->SlotId);
 
@@ -127,13 +127,13 @@ static void MouseSetupEndpoint(XhciController* Xhci, MouseDevice* Mouse) {
     Free(&KernelPool, inputCtx);
 }
 
-static void MousePrepareTransfer(MouseDevice* Mouse) {
+void MousePrepareTransfer(MouseDevice* Mouse) {
     u32 idx = Mouse->Enqueue;
-    u8* buffer = (u8*)AlignedAlloc(&KernelPool, Mouse->MaxPacketSize, 64);
-    MemSet(buffer, 0, Mouse->MaxPacketSize);
+    
+    u64 bufferPhys = (u64)Mouse->ReportBuffer;
 
-    Mouse->TrbRing[idx].ParameterLow = (u32)((u64)buffer & 0xFFFFFFFF);
-    Mouse->TrbRing[idx].ParameterHigh = (u32)((u64)buffer >> 32);
+    Mouse->TrbRing[idx].ParameterLow = (u32)(bufferPhys & 0xFFFFFFFF);
+    Mouse->TrbRing[idx].ParameterHigh = (u32)(bufferPhys >> 32);
     Mouse->TrbRing[idx].Status = Mouse->MaxPacketSize;
     Mouse->TrbRing[idx].Control = (XHCI_TRB_NORMAL << 10) | XHCI_TRB_IOC | Mouse->Ccs;
 
@@ -159,7 +159,7 @@ MouseDevice* MouseInit(XhciController *Xhci){
         if (!devCtx) continue;
 
         u8 deviceDescBuf[18];
-        if (!UsbControlTransferMouse(Xhci, slot, 1, 0x80, 6, 0x0100, 0, 18, deviceDescBuf)) {
+        if (XhciControlTransfer(Xhci, slot, 0x80, USB_REQ_GET_DESCRIPTOR, (USB_DT_DEVICE << 8), 0, 18, deviceDescBuf) != XHCI_CMPLT_SUCCESS) {
             continue;
         }
 
@@ -250,16 +250,16 @@ void MousePoll(MouseDevice* Mouse) {
             u8 slotId = (ev.Control >> 24) & 0xFF;
             
             if (slotId == Mouse->SlotId && code == XHCI_CMPLT_SUCCESS) {
-                XhciDeviceContext* devCtx = (XhciDeviceContext*)xhci->Dcbaa->DevCtxPtr[Mouse->SlotId];
-                u32 epIdx = Mouse->EpIn;
-                u64 deq = devCtx->Ep[epIdx - 1].DequeueLow | ((u64)devCtx->Ep[epIdx - 1].DequeueHigh << 32);
-                XhciTrb* ring = (XhciTrb*)(deq & ~0xF);
+                u64 completedTrbPhys = ev.ParameterLow | ((u64)ev.ParameterHigh << 32);
+                XhciTrb* completedTrb = (XhciTrb*)completedTrbPhys;
                 
-                u8* report = (u8*)((u64)ring[0].ParameterLow | ((u64)ring[0].ParameterHigh << 32));
+                u8* report = (u8*)((u64)completedTrb->ParameterLow | ((u64)completedTrb->ParameterHigh << 32));
+                
                 if (report) {
                     Mouse->Buttons = report[0] & 0x07;
                     s8 dx = (s8)report[1];
                     s8 dy = (s8)report[2];
+                    
                     Mouse->X += dx;
                     Mouse->Y += dy;
 
@@ -267,11 +267,12 @@ void MousePoll(MouseDevice* Mouse) {
                     Mouse->Buffer[1] = dy;
                     Mouse->Buffer[2] = report[0] & 0x07;
                     Mouse->Buffer[3] = 0;
-
-                    Free(&KernelPool, report);
                 }
+                
                 MousePrepareTransfer(Mouse);
-                XhciRingEpDoorbell(xhci, Mouse->SlotId, Mouse->EpIn);
+                
+                u8 dci = (Mouse->EpIn * 2) + 1;
+                XhciRingEpDoorbell(xhci, Mouse->SlotId, dci);
             }
         }
     }

@@ -16,6 +16,7 @@ typedef struct MouseDevice {
     s32 Y;
     u8 Buttons;
     s8 Buffer[4];
+    u8 ReportBuffer[8];
     XhciController* Xhci;
 } MouseDevice;
 
@@ -25,3 +26,4 @@ typedef struct MouseDevice {
 MouseDevice* MouseInit(XhciController *Xhci);
 void MousePoll(MouseDevice* Mouse);
 void MouseGetDelta(MouseDevice* Mouse, s16* Dx, s16* Dy, u8* Buttons);
+void MousePrepareTransfer(struct MouseDevice* Mouse);

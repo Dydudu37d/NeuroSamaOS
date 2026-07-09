@@ -11,8 +11,8 @@
 #define LOG2E 1.44269504088896340735992468100189213742664595415299L
 #define LN2 0.69314718055994530941723212145817656807550013436026L
 
-static const double DOUBLE_ONE = 1.0;
-static const float FLOAT_ONE = 1.0f;
+static const f64 DOUBLE_ONE = 1.0;
+static const f32 FLOAT_ONE = 1.0f;
 
 static inline s64 S64Abs(s64 x) {
     s64 result;
@@ -37,9 +37,9 @@ static inline u64 U64Pow(u64 x, u64 exp) {
     return result;
 }
 
-static inline double DoublePow(double x, u64 time) {
-    double result = 1.0;
-    double base = x;
+static inline f64 DoublePow(f64 x, u64 time) {
+    f64 result = 1.0;
+    f64 base = x;
     while (time > 0) {
         if (time & 1) result *= base;
         base *= base;
@@ -48,9 +48,9 @@ static inline double DoublePow(double x, u64 time) {
     return result;
 }
 
-static inline double DoubleAbs(double x) {
+static inline f64 DoubleAbs(f64 x) {
     const unsigned long long mask = 0x7FFFFFFFFFFFFFFFULL;
-    double result;
+    f64 result;
     __asm__ volatile (
         "andpd   %1, %0"
         : "=x"(result)
@@ -59,10 +59,10 @@ static inline double DoubleAbs(double x) {
     return result;
 }
 
-static inline double DoubleMod(double x, double y) {
+static inline f64 DoubleMod(f64 x, f64 y) {
     if (!y || !x) return 0.0;
     
-    double result;
+    f64 result;
     __asm__ volatile (
         "movsd %1, %%xmm0\n\t"
         "movsd %2, %%xmm1\n\t"
@@ -79,10 +79,10 @@ static inline double DoubleMod(double x, double y) {
     return result;
 }
 
-static inline double DoubleMod2PI(double x) {
-    double result;
-    const double inv_2pi = INV_2PI;
-    const double two_pi = M_2PI;
+static inline f64 DoubleMod2PI(f64 x) {
+    f64 result;
+    const f64 inv_2pi = INV_2PI;
+    const f64 two_pi = M_2PI;
     
     __asm__ volatile (
         "movsd %1, %%xmm0\n\t"
@@ -101,12 +101,12 @@ static inline double DoubleMod2PI(double x) {
     return result;
 }
 
-static inline float DoubleSin(double x) {
+static inline f32 DoubleSin(f64 x) {
     if (x != x) return x;
     if (x > 1e7f || x < -1e7f) return 0.0f;
     
-    double sign = 1.0f;
-    double result;
+    f64 sign = 1.0f;
+    f64 result;
     
     __asm__ volatile (
         "movss       %1,       %%xmm0\n\t"
@@ -184,10 +184,10 @@ static inline float DoubleSin(double x) {
     return result;
 }
 
-static inline double DoubleCos(double x) {
+static inline f64 DoubleCos(f64 x) {
     x = DoubleMod2PI(x);
     
-    double sign = 1.0;
+    f64 sign = 1.0;
     if (x < 0) x = -x;
     if (x > M_PI) {
         x = M_2PI - x;
@@ -197,8 +197,8 @@ static inline double DoubleCos(double x) {
         x = M_PI - x;
     }
     
-    double x2 = x * x;
-    double result;
+    f64 x2 = x * x;
+    f64 result;
     
     __asm__ volatile (
         "movsd %1, %%xmm1\n\t"
@@ -240,8 +240,8 @@ static inline double DoubleCos(double x) {
     return sign * result;
 }
 
-static inline float FloatSin(float x) {
-    float result;
+static inline f32 FloatSin(f32 x) {
+    f32 result;
     __asm__ volatile (
         "movss %1, %%xmm0\n\t"
         "movss %2, %%xmm1\n\t"
@@ -276,13 +276,13 @@ static inline float FloatSin(float x) {
     return result;
 }
 
-static inline float FloatCos(float x) {
+static inline f32 FloatCos(f32 x) {
     return FloatSin(x + M_HALF_PI);
 }
 
-static inline double DoubleExp(double x) {
-    double result;
-    const double one = 1.0;
+static inline f64 DoubleExp(f64 x) {
+    f64 result;
+    const f64 one = 1.0;
     
     __asm__ volatile (
         "movsd      %1,       %%xmm0\n\t"
@@ -330,7 +330,7 @@ static inline double DoubleExp(double x) {
     return result;
 }
 
-static inline void DoubleExp4(const double* x, double* result) {
+static inline void DoubleExp4(const f64* x, f64* result) {
     __asm__ volatile (
         "vmovupd %1, %%ymm0\n\t"
         "vbroadcastsd %2, %%ymm1\n\t"
@@ -385,19 +385,19 @@ static inline void DoubleExp4(const double* x, double* result) {
     );
 }
 
-static inline double DoubleLog(double x) {
+static inline f64 DoubleLog(f64 x) {
     if (x <= 0.0) return -1.0 / 0.0;
     
-    union { double d; u64 u; } v = { .d = x };
+    union { f64 d; u64 u; } v = { .d = x };
     int exp = (int)((v.u >> 52) & 0x7FF) - 1023;
     v.u = (v.u & 0x800FFFFFFFFFFFFFULL) | 0x3FF0000000000000ULL;
-    double m = v.d;
+    f64 m = v.d;
     
-    double z = (m - 1.0) / (m + 1.0);
-    double z2 = z * z;
-    double result;
-    const double one = 1.0;
-    const double two = 2.0;
+    f64 z = (m - 1.0) / (m + 1.0);
+    f64 z2 = z * z;
+    f64 result;
+    const f64 one = 1.0;
+    const f64 two = 2.0;
     
     __asm__ volatile (
         "movsd      %1,       %%xmm0\n\t"
@@ -439,11 +439,11 @@ static inline double DoubleLog(double x) {
     return result;
 }
 
-static inline double DoubleTanh(double x) {
-    double ax = DoubleAbs(x);
+static inline f64 DoubleTanh(f64 x) {
+    f64 ax = DoubleAbs(x);
     if (ax > 19.0) return (x > 0) ? 1.0 : -1.0;
     
-    double result;
+    f64 result;
     __asm__ volatile (
         "movsd %1, %%xmm0\n\t"
         "movsd %2, %%xmm1\n\t"
@@ -470,16 +470,16 @@ static inline double DoubleTanh(double x) {
     return result;
 }
 
-static inline double DoubleAtan(double x) {
-    double ax = DoubleAbs(x);
+static inline f64 DoubleAtan(f64 x) {
+    f64 ax = DoubleAbs(x);
     int inverted = 0;
     if (ax > 1.0) {
         ax = 1.0 / ax;
         inverted = 1;
     }
     
-    double ax2 = ax * ax;
-    double result;
+    f64 ax2 = ax * ax;
+    f64 result;
     
     __asm__ volatile (
         "movsd %1, %%xmm0\n\t"
@@ -523,7 +523,7 @@ static inline double DoubleAtan(double x) {
     return result;
 }
 
-static inline double DoubleAtan2(double y, double x) {
+static inline f64 DoubleAtan2(f64 y, f64 x) {
     if (x == 0.0) {
         if (y > 0) return M_HALF_PI;
         if (y < 0) return -M_HALF_PI;
@@ -534,7 +534,7 @@ static inline double DoubleAtan2(double y, double x) {
         return M_PI;
     }
     
-    double result = DoubleAtan(y / x);
+    f64 result = DoubleAtan(y / x);
     if (x < 0) {
         if (y >= 0) result += M_PI;
         else result -= M_PI;
@@ -542,9 +542,9 @@ static inline double DoubleAtan2(double y, double x) {
     return result;
 }
 
-static inline double DoubleSqrt(double x) {
+static inline f64 DoubleSqrt(f64 x) {
     if (x <= 0.0) return 0.0;
-    double result;
+    f64 result;
     __asm__ volatile (
         "sqrtsd %1, %%xmm0\n\t"
         "movsd %%xmm0, %0"
@@ -555,11 +555,11 @@ static inline double DoubleSqrt(double x) {
     return result;
 }
 
-static inline double DoubleSinCos(double x, double* cos_out) {
+static inline f64 DoubleSinCos(f64 x, f64* cos_out) {
     x = DoubleMod2PI(x);
     
-    double sign_sin = 1.0;
-    double sign_cos = 1.0;
+    f64 sign_sin = 1.0;
+    f64 sign_cos = 1.0;
     if (x < 0) {
         x = -x;
         sign_sin = -sign_sin;
@@ -574,8 +574,8 @@ static inline double DoubleSinCos(double x, double* cos_out) {
         sign_cos = -sign_cos;
     }
     
-    double x2 = x * x;
-    double sin_res, cos_res;
+    f64 x2 = x * x;
+    f64 sin_res, cos_res;
     
     __asm__ volatile (
         "movsd %1, %%xmm0\n\t"
@@ -647,7 +647,7 @@ static inline double DoubleSinCos(double x, double* cos_out) {
     return sign_sin * sin_res;
 }
 
-static inline void DoubleSin4(const double* x, double* result) {
+static inline void DoubleSin4(const f64* x, f64* result) {
     __asm__ volatile (
         "vmovupd %1, %%ymm0\n\t"
         "vbroadcastsd %2, %%ymm1\n\t"
@@ -702,7 +702,7 @@ static inline void DoubleSin4(const double* x, double* result) {
     );
 }
 
-static inline void DoubleCos4(const double* x, double* result) {
+static inline void DoubleCos4(const f64* x, f64* result) {
     __asm__ volatile (
         "vmovupd %1, %%ymm0\n\t"
         "vbroadcastsd %2, %%ymm1\n\t"

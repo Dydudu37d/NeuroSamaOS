@@ -33,10 +33,16 @@ typedef struct KeyboardDevice {
     u8 Buffer[KEY_BUFFER_SIZE];
     u8 ReadPos;
     u8 WritePos;
+    u8 ReportBuffer[8];
+    XhciTrb KbdRing[64];
+    u32 Enqueue;
+    u8 Ccs;
     XhciController* Xhci;
 } KeyboardDevice;
 
+void KeyboardPushScancode(struct KeyboardDevice* Kbd, u8 Scancode);
+void KeyboardQueueTransfer(struct XhciController* Xhci, struct KeyboardDevice* Kbd);
+
 KeyboardDevice* KeyboardInit(XhciController* Xhci);
-void KeyboardPoll(KeyboardDevice* Kbd);
 u8 KeyboardGetChar(KeyboardDevice* Kbd);
 u8 KeyboardHasChar(KeyboardDevice* Kbd);

@@ -10,8 +10,8 @@
 #define ERROR(x) x>MaxTaskCount
 
 typedef struct{
-    void* (*CallFunc)(void*);
-    void* (*DelFunc)(void*);
+    void* (*CallFunc)(void* ArgList);
+    void* (*DelFunc)(void* ArgList);
     void *Arg;
     _Bool Active;
     const char* Name;

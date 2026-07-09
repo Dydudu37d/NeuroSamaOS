@@ -58,9 +58,9 @@ run-whpx: boot.efi
 		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
 	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
-		-device piix3-usb-uhci,id=uhci \
-		-device usb-kbd,bus=uhci.0 \
-		-device usb-mouse,bus=uhci.0 \
+		-device qemu-xhci,id=xhci0 \
+		-device usb-kbd,bus=xhci0.0 \
+		-device usb-mouse,bus=xhci0.0 \
 		-trace events=./tmp/uhci.trace
 
 
@@ -78,9 +78,9 @@ debug-whpx: boot.efi
 		-boot order=d \
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
-		-device piix3-usb-uhci,id=uhci \
-		-device usb-kbd,bus=uhci.0 \
-		-device usb-mouse,bus=uhci.0 \
+		-device qemu-xhci,id=xhci0 \
+		-device usb-kbd,bus=xhci0.0 \
+		-device usb-mouse,bus=xhci0.0 \
 		-trace events=./tmp/uhci.trace
 
 run-kvm: boot.efi
@@ -98,9 +98,9 @@ run-kvm: boot.efi
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
 		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
-		-device piix3-usb-uhci,id=uhci \
-		-device usb-kbd,bus=uhci.0 \
-		-device usb-mouse,bus=uhci.0 \
+		-device qemu-xhci,id=xhci0 \
+		-device usb-kbd,bus=xhci0.0 \
+		-device usb-mouse,bus=xhci0.0 \
 		-d guest_errors,unimp -D qemu.log \
 		-no-reboot -no-shutdown -trace events=./tmp/uhci.trace
 
@@ -124,9 +124,9 @@ debug-kvm: boot.efi
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
 		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
-		-device piix3-usb-uhci,id=uhci \
-		-device usb-kbd,bus=uhci.0 \
-		-device usb-mouse,bus=uhci.0 \
+		-device qemu-xhci,id=xhci0 \
+		-device usb-kbd,bus=xhci0.0 \
+		-device usb-mouse,bus=xhci0.0 \
 		-trace events=./tmp/uhci.trace
 
 run-tcg: boot.efi

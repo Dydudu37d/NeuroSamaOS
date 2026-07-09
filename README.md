@@ -11,6 +11,16 @@ Erm......
 - JIT
 - HolyC-JIT
 - FishC-JIT
+- La57
+- VA=PA
+- XHCIz
+- No EHCI OHCI UHCI (I rm -rf ohci.* uhci.*)
+- GM206
+- ATA & FAT32 & GPT
+- GOP
+- DSLMaker(File name is DSLMake)
+- rdtsc
+- UEFI64
 
 ## Acknowledgments
 Thanks to the Linux kernel open-source community and NVIDIA's official documentation and Nouveau for providing valuable reference material on hardware specifications. Thanks also to DeepSeek and Google Gemini for its assistance in organizing technical ideas during development.
@@ -19,6 +29,9 @@ Thanks to the Linux kernel open-source community and NVIDIA's official documenta
 
 ## Info
 NeuroSamaOS, Polling,No int,irq only 0~31,gdt ring0,no ring3,VA=PA
+
+## DSLMaker
+Right,Everyone can Make DSL/General Lang like Scratch3.x
 
 ## Build
 ```bash
@@ -34,4 +47,4 @@ make run
 make debug
 ```
 
-###### (PS:I like Use TempleOS,Its Good) 
+###### (PS:I like Use TempleOS,Its Good)

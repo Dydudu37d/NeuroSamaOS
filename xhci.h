@@ -2,6 +2,9 @@
 
 #include "int.h"
 
+struct MouseDevice;
+struct KeyboardDevice;
+
 typedef struct XhciCapRegs {
     u8 CapLength;
     u8 Reserved;
@@ -214,6 +217,10 @@ typedef struct UsbEndpointDescriptor {
 #define XHCI_CMPLT_SHORT_PACKET 13
 #define XHCI_CMPLT_STALL 20
 #define XHCI_CMPLT_BABBLE 22
+
+extern struct MouseDevice* ActiveMouse;
+extern struct KeyboardDevice* ActiveKbd;
+extern u64 XHCI_MAX_PORTS;
 
 u64 XhciGetMmioBase(u8 Bus, u8 Slot, u8 Func);
 XhciController* XhciInit(u64 MmioBase);

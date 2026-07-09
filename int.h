@@ -10,6 +10,10 @@ typedef signed short s16;
 typedef signed int s32;
 typedef signed long long s64;
 
+typedef double f64;
+typedef float f32;
+typedef long double f80;
+
 typedef __SIZE_TYPE__ size_t;
 
 typedef __builtin_va_list __gnuc_va_list;
@@ -27,3 +31,5 @@ typedef __gnuc_va_list va_list;
 inline _Bool IsAligned(void* ptr,u8 Aligned) {
     return ((((u64)ptr)) & Aligned) == 0;
 }
+
+#include "IntPlus.h"

@@ -5,6 +5,12 @@
 #include "str.h"
 #include "debug.h"
 #include "pci.h"
+#include "keyboard.h"
+#include "mouse.h"
+
+MouseDevice* ActiveMouse = NULL;
+KeyboardDevice* ActiveKbd = NULL;
+u64 XHCI_MAX_PORTS=15;
 
 extern AllocPool KernelPool;
 
@@ -139,6 +145,9 @@ XhciController* XhciInit(u64 MmioBase) {
     for (volatile u32 i = 0; i < 1000000; i++) { __asm__ volatile ("pause"); }
 
     *(volatile u32*)((u64)opBase+0x04)&=~(0x0000003E);
+
+    u32 hcsparams1 = *(volatile u32*)((u64)MmioBase + 0x04);
+    XHCI_MAX_PORTS = (u8)((hcsparams1 >> 24) & 0xFF);
 
     timeout = 500000;
     while (timeout--) {
@@ -319,35 +328,31 @@ u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRe
     trb->ParameterLow = ((u32)bRequest << 8) | bmRequestType;
     trb->ParameterHigh = ((u32)wIndex << 16) | wValue;
     trb->Status = wLength;
-    trb->Control = (XHCI_TRB_SETUP << 10) | (3 << 16) | cycle;
-    enqueue = (enqueue + 1) % size;
-    if (enqueue == 0) cycle ^= 1;
+    trb->Control = (XHCI_TRB_SETUP_STAGE << 10) | (3 << 16) | cycle;
+    enqueue = (enqueue + 1) % size; if (enqueue == 0) cycle ^= 1;
 
     if (wLength > 0) {
         u32 dir = (bmRequestType & 0x80) ? (1 << 16) : 0;
-        u64 bufferPhys = (u64)Buffer;
-        
         trb = &ring->Ring[enqueue];
-        trb->ParameterLow = (u32)(bufferPhys & 0xFFFFFFFF);
-        trb->ParameterHigh = (u32)(bufferPhys >> 32);
+        trb->ParameterLow = (u32)((u64)Buffer & 0xFFFFFFFF);
+        trb->ParameterHigh = (u32)((u64)Buffer >> 32);
         trb->Status = wLength;
-        trb->Control = (XHCI_TRB_DATA << 10) | dir | (1 << 17) | cycle;
-        enqueue = (enqueue + 1) % size;
-        if (enqueue == 0) cycle ^= 1;
+        trb->Control = (XHCI_TRB_DATA_STAGE << 10) | dir | cycle;
+        enqueue = (enqueue + 1) % size; if (enqueue == 0) cycle ^= 1;
     }
 
+    u32 statusDir = (bmRequestType & 0x80) ? 0 : (1 << 16);
     trb = &ring->Ring[enqueue];
     trb->ParameterLow = 0;
     trb->ParameterHigh = 0;
     trb->Status = 0;
-    trb->Control = (XHCI_TRB_STATUS << 10) | (1 << 16) | cycle;
-    enqueue = (enqueue + 1) % size;
-    if (enqueue == 0) cycle ^= 1;
+    trb->Control = (XHCI_TRB_STATUS_STAGE << 10) | statusDir | XHCI_TRB_IOC | cycle;
+    enqueue = (enqueue + 1) % size; if (enqueue == 0) cycle ^= 1;
 
     ring->Enqueue = enqueue;
     ring->Cycle = cycle;
 
-    XhciRingDoorbell(Xhci, SlotId, 0);
+    XhciRingDoorbell(Xhci, SlotId, 1); 
 
     u32 timeout = 1000000;
     XhciTrb ev;
@@ -363,7 +368,6 @@ u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRe
         }
         __asm__ volatile("pause");
     }
-    
     return 0xFF;
 }
 
@@ -420,25 +424,69 @@ void XhciParseDevice(XhciController* Xhci, u8 SlotId) {
 }
 
 void XhciPollEvents(XhciController* Xhci) {
+    if (!Xhci) {
+        DebugStr("XhciPollEvents: Xhci is NULL!\n");
+        return;
+    }
+
     XhciTrb Event;
-    
     while (XhciReadEvent(Xhci, &Event)) {
         u8 Type = (Event.Control >> 10) & 0x3F;
         u8 SlotId = (Event.Control >> 24) & 0xFF;
         u8 CompletionCode = (Event.Status >> 24) & 0xFF;
 
         switch (Type) {
-            case XHCI_TRB_COMMAND_COMPLETE:
-                break;
+            case XHCI_TRB_TRANSFER_EVENT: {
+                if (CompletionCode != XHCI_CMPLT_SUCCESS) continue;
 
-            case XHCI_TRB_TRANSFER_EVENT:
+                if (ActiveMouse && ((u64)ActiveMouse < 0x10000)) {
+                    DebugStr("ActiveMouse is an invalid pointer!\n");
+                    continue;
+                }
+                if (ActiveKbd && ((u64)ActiveKbd < 0x10000)) {
+                    DebugStr("ActiveKbd is an invalid pointer!\n");
+                    continue;
+                }
+
+                if (ActiveMouse && SlotId == ActiveMouse->SlotId) {
+                    u8* report = ActiveMouse->ReportBuffer;
+                    if (!report) continue;
+                    
+                    ActiveMouse->Buttons = report[0] & 0x07;
+                    ActiveMouse->Buffer[0] = (s8)report[1];
+                    ActiveMouse->Buffer[1] = (s8)report[2];
+                    ActiveMouse->Buffer[2] = report[0] & 0x07;
+
+                    MousePrepareTransfer(ActiveMouse);
+                    XhciRingDoorbell(Xhci, SlotId, (ActiveMouse->EpIn * 2) + 1);
+                } 
+                else if (ActiveKbd && SlotId == ActiveKbd->SlotId) {
+                    u8* report = ActiveKbd->ReportBuffer;
+                    if (!report) continue;
+                    
+                    if (report[2]) {
+                        u8 scancode = report[2];
+                        KeyboardPushScancode(ActiveKbd, scancode); 
+                    }
+                    KeyboardQueueTransfer(Xhci, ActiveKbd);
+                }
                 break;
+            }
 
             case XHCI_TRB_PORT_STATUS_CHANGE: {
                 u32 PortId = (Event.Status >> 16) & 0xFF;
-                XhciPortRegs* Port = &Xhci->Ports[PortId - 1];
-                u32 Portsc = Port->Portsc;
+                
+                if (PortId == 0 || PortId > XHCI_MAX_PORTS) {
+                    DebugStr("Invalid PortId: ");
+                    DebugU32(PortId);
+                    DebugStr("\n");
+                    continue;
+                }
 
+                XhciPortRegs* Port = &Xhci->Ports[PortId - 1];
+                if (!Port) continue;
+                
+                u32 Portsc = Port->Portsc;
                 if (Portsc & XHCI_PORTSC_CSC) {
                     if (Portsc & XHCI_PORTSC_CCS) {
                         u8 Speed = (Portsc >> 10) & 0x0F;
@@ -446,40 +494,7 @@ void XhciPollEvents(XhciController* Xhci) {
                     }
                     Port->Portsc = Portsc | XHCI_PORTSC_CSC;
                 }
-
-                if (Portsc & XHCI_PORTSC_PRC) {
-                    Port->Portsc = Portsc | XHCI_PORTSC_PRC;
-                }
-
-                if (Portsc & XHCI_PORTSC_PEC) {
-                    Port->Portsc = Portsc | XHCI_PORTSC_PEC;
-                }
-
-                if (Portsc & XHCI_PORTSC_WRC) {
-                    Port->Portsc = Portsc | XHCI_PORTSC_WRC;
-                }
                 break;
-            }
-        }
-    }
-}
-
-void XhciScanPorts(XhciController* Xhci) {
-    u8 maxPorts = (u8)((Xhci->Cap->Hcsparams1 >> 24) & 0xFF);
-
-    for (u8 i = 1; i <= maxPorts; i++) {
-        XhciPortRegs* port = &Xhci->Ports[i - 1];
-        u32 portsc = port->Portsc;
-
-        if (portsc != 0 && (portsc & XHCI_PORTSC_CCS)) {
-            portsc |= XHCI_PORTSC_PR;
-            port->Portsc = portsc;
-            SystemBusySleepMs(20);
-
-            portsc = port->Portsc;
-            if (portsc & XHCI_PORTSC_PED) {
-                u8 speed = (portsc >> 10) & 0x0F;
-                XhciEnumerateDevice(Xhci, i, speed);
             }
         }
     }

@@ -16,12 +16,10 @@
 #include "fat32.h"
 #include "mouse.h"
 #include "keyboard.h"
-#include "ohci.h"
 #include "hda.h"
 #include "gm206.h"
-#include "uhci.h"
-#include "UhciMouse.h"
-#include "UhciKeyboard.h"
+#include "clock.h"
+#include "xhci.h"
 
 #define UHCI_LOW_MEMORY_BASE 0x10000
 #define UHCI_LOW_MEMORY_SIZE (32 * 1024 * 1024)
@@ -32,8 +30,6 @@
 #define PAGE_HUGE     (1ULL << 7)
 
 #define KERNEL_POOL_BASE 0x10000
-#define KERNEL_POOL_PAGES EFI_SIZE_TO_PAGES(128 * 1024 * 1024)
-#define KERNEL_POOL_SIZE (KERNEL_POOL_PAGES * 4096)
 
 void* GopOut=NULL;
 HDR_PIXEL* GopBack=NULL;
@@ -57,17 +53,6 @@ u8* KernelStack = NULL;
 EFI_HANDLE ImageBase;
 
 AllocPool KernelPool = { .Head=NULL};
-AllocPool UHCILowMemoryPool = {0};
-
-void *USBMousePollTask(void *Arg) {
-    USBMousePoll((USBMouse*)Arg);
-    return Arg;
-}
-
-void *USBKeyboardPollTask(void *Arg) {
-    USBKeyboardPoll((USBKeyboard*)Arg);
-    return Arg;
-}
 
 #pragma clang optimize off
 __attribute__((optnone))
@@ -104,33 +89,60 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
     int use_l5 = IsLa57Supported();
 
     alloc_addr = 0xFFFFFFFF;
-    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) {
-        DebugStr("AllocatePages failed!\n");
-        return 0;
-    }
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
     u64* root_table = (u64*)alloc_addr;
-    for (int i = 0; i < 512; i++) root_table[i] = 0;
+    MemSet(root_table, 0, 4096);
 
     u64* pml4 = NULL;
     if (use_l5) {
         alloc_addr = 0xFFFFFFFF;
         if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
         pml4 = (u64*)alloc_addr;
-        for (int i = 0; i < 512; i++) pml4[i] = 0;
+        MemSet(pml4, 0, 4096);
         root_table[0] = ((u64)pml4 & ~0xFFFULL) | 0x003;
     } else {
         pml4 = root_table;
     }
 
-    u64 max_1gb_pages = (MaxPhysMem + 1073741824ULL - 1) / 1073741824ULL;
-    if (max_1gb_pages > 512) max_1gb_pages = 512;
+    if (pml4[0] == 0) {
+        alloc_addr = 0xFFFFFFFF;
+        if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+        u64* pdpt = (u64*)alloc_addr;
+        MemSet(pdpt, 0, 4096);
+        pml4[0] = ((u64)pdpt & ~0xFFFULL) | 0x003;
+    }
+    u64* pdpt_low = (u64*)(pml4[0] & ~0xFFFULL);
+
+    alloc_addr = 0xFFFFFFFF;
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+    u64* pd_low = (u64*)alloc_addr;
+    MemSet(pd_low, 0, 4096);
+    pdpt_low[0] = ((u64)pd_low & ~0xFFFULL) | 0x003;
+
+    alloc_addr = 0xFFFFFFFF;
+    if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
+    u64* pt_4k = (u64*)alloc_addr;
+    MemSet(pt_4k, 0, 4096);
+    for (int i = 0; i < 512; i++) {
+        pt_4k[i] = (i * 0x1000) | 0x003;
+    }
+    pd_low[0] = ((u64)pt_4k & ~0xFFFULL) | 0x003;
+
+    for (int i = 1; i < 512; i++) {
+        pd_low[i] = (i * 0x200000) | 0x183;
+    }
+
+    Cu128 max_phys = (Cu128)MaxPhysMem;
+    Cu128 divisor = (Cu128)0x40000000ULL;
+    Cu128 result = (max_phys + divisor - 1) / divisor;
+    u64 max_1gb_pages_limit = use_l5 ? 262144 : 512;
+    u64 max_1gb_pages = (result > max_1gb_pages_limit) ? max_1gb_pages_limit : (u64)result;
 
     for (u64 i = 1; i < max_1gb_pages; i++) {
-        u64 phys = i * 1073741824ULL;
-
+        u64 phys = i * 0x40000000ULL;
         u64 pml5_idx = phys / (1ULL << 48);
         u64 pml4_idx = (phys % (1ULL << 48)) / (1ULL << 39);
-        u64 pdpt_idx = (phys % (1ULL << 39)) / 1073741824ULL;
+        u64 pdpt_idx = (phys % (1ULL << 39)) / 0x40000000ULL;
 
         if (!use_l5 && phys >= (1ULL << 48)) break;
         if (pml5_idx >= 512) break;
@@ -141,7 +153,7 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
                 alloc_addr = 0xFFFFFFFF;
                 if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
                 u64* new_pml4 = (u64*)alloc_addr;
-                for (int k = 0; k < 512; k++) new_pml4[k] = 0;
+                MemSet(new_pml4, 0, 4096);
                 root_table[pml5_idx] = ((u64)new_pml4 & ~0xFFFULL) | 0x003;
             }
             active_pml4 = (u64*)(root_table[pml5_idx] & ~0xFFFULL);
@@ -151,16 +163,11 @@ u64* BuildDynamicPageTable(u64 MaxPhysMem, u64 PhysMem, EFI_BOOT_SERVICES* bs) {
             alloc_addr = 0xFFFFFFFF;
             if (bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, 1, &alloc_addr) != EFI_SUCCESS) return 0;
             u64* new_pdpt = (u64*)alloc_addr;
-            for (int k = 0; k < 512; k++) new_pdpt[k] = 0;
+            MemSet(new_pdpt, 0, 4096);
             active_pml4[pml4_idx] = ((u64)new_pdpt & ~0xFFFULL) | 0x003;
         }
         u64* cur_pdpt = (u64*)(active_pml4[pml4_idx] & ~0xFFFULL);
-
-        if (phys > PhysMem || phys > MaxPhysMem) {
-            cur_pdpt[pdpt_idx] = phys | 0x193;
-        } else {
-            cur_pdpt[pdpt_idx] = phys | 0x083;
-        }
+        cur_pdpt[pdpt_idx] = phys | 0x183;
     }
 
     return root_table;
@@ -184,21 +191,11 @@ EFI_STATUS ExitBootServices_Safe(EFI_HANDLE ImageHandle) {
 }
 
 u64 GetXhciMmioBase() {
-    for (u16 bus = 0; bus < 256; bus++) {
-        for (u8 dev = 0; dev < 32; dev++) {
-            for (u8 func = 0; func < 8; func++) {
-                u32 id = PCIReadDWORD(bus, dev, func, 0x00);
-                if (id == 0xFFFFFFFF) continue;
-                u32 classRev = PCIReadDWORD(bus, dev, func, 0x08);
-                u8 class = (classRev >> 24) & 0xFF;
-                u8 subclass = (classRev >> 16) & 0xFF;
-                u8 progIf = (classRev >> 8) & 0xFF;
-                if (class == 0x0C && subclass == 0x03 && progIf == 0x30) {
-                    PCIEnableDevice(bus, dev, func);
-                    return PCIGetBARAddress(bus, dev, func, 0);
-                }
-            }
-        }
+    u8 bus=0xFF,dev=0xFF,func=0xFF;
+    PCIFindDeviceByClass(0x0C,0x03,0x30,&bus,&dev,&func);
+    if (dev!=0xFF){
+        PCIEnableDevice(bus, dev, func);
+        return PCIGetBARAddress(bus, dev, func, 0);
     }
     return 0;
 }
@@ -331,6 +328,11 @@ u32 GetGopByWH(u64 W, u64 H)
     }
 
     return BestMode;
+}
+
+void* XhciPollEventsTask(void* Arg){
+    XhciPollEvents((XhciController*)Arg);
+    return Arg;
 }
 
 EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
@@ -527,35 +529,6 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     return 0;
 }
 
-void OnRequestComplete(UHCIRequest *req)
-{
-    DebugStr("Request completed: Addr=");
-    DebugU64(req->DeviceAddress);
-    DebugStr(" EP=");
-    DebugU64(req->Endpoint);
-    DebugStr(" Length=");
-    DebugU64(req->ActualLength);
-    DebugStr("\r\n");
-}
-
-void OnRequestError(UHCIRequest *req, UHCIResult error)
-{
-    DebugStr("Request error: ");
-    DebugU64(error);
-    DebugStr(" Addr=");
-    DebugU64(req->DeviceAddress);
-    DebugStr("\r\n");
-}
-
-void OnPortChange(u8 port, u16 status)
-{
-    DebugStr("Port ");
-    DebugU64(port);
-    DebugStr(" changed: 0x");
-    DebugU64(status);
-    DebugStr("\r\n");
-}
-
 __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugStr("Jumped To KernelMain.\n");
     
@@ -637,136 +610,20 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
         DebugStr("GTX960 Not Found.\n");
     }
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
-    DebugStr("Init UHCI.\n");
-    UHCIHostController *hc = NULL;
-    UHCIContext *ctx = NULL;
-    USBMouse* UhciMouse = NULL;
-    USBKeyboard* UhciKeyboard = NULL;
-    u8 Bus = 0xFF, Dev = 0xFF, Func = 0xFF;
-    PCIFindDeviceByClass(UHCI_CLASS_CODE, UHCI_SUBCLASS, UHCI_INTERFACE, &Bus, &Dev, &Func);
-    if (Dev != 0xFF) {
-        DebugStr("Found USB controller: Bus=0x");
-        DebugU8(Bus);
-        DebugStr(" Dev=0x");
-        DebugU8(Dev);
-        DebugStr(" Func=0x");
-        DebugU8(Func);
-        DebugStr("\n");
-        u16 pci_cmd = PCIReadWORD(Bus, Dev, Func, 0x04);
-        pci_cmd |= (1 << 0) | (1 << 1) | (1 << 2);
-        PCIWriteWORD(Bus, Dev, Func, 0x04, pci_cmd);
-        DebugStr("PCI Command Region Activated. Command: 0x");
-        DebugU16(PCIReadWORD(Bus, Dev, Func, 0x04));
-        DebugChar('\n');
-        hc = UHCICreate(Bus, Dev, Func, &KernelPool);
-        if (!hc) {
-            DebugStr("UHCICreate failed!\n");
-            goto uhci_end;
+    DebugStr("Init XHCI.\n");
+    u64 XhciMMIOBase=GetXhciMmioBase();
+    if (XhciMMIOBase){
+        XhciController* Xhci=XhciInit(XhciMMIOBase);
+        if(Xhci){
+            ActiveKbd=KeyboardInit(Xhci);
+            ActiveMouse=MouseInit(Xhci);
+            TaskAdd((Task){.Active=1,.Arg=Xhci,.CallFunc=XhciPollEventsTask,.IntervalNs=1,.Target=NULL,.DelFunc=NULL,.Name="XHCI_POLL",.NextWaitNs=0},1);
         }
-        DebugStr("UHCICreate succeeded. IOBase=0x");
-        DebugU16(hc->IOBase);
-        DebugStr("\n");
-        hc->MemoryPool = &KernelPool;
-        DebugStr("hc->MemoryPool = 0x");
-        DebugU64((u64)hc->MemoryPool);
-        DebugStr("\n");
-        ctx = MaxAlloc(&KernelPool, sizeof(UHCIContext), UHCI_MAX_ADDRESS);
-        if (!ctx) {
-            DebugStr("Context MaxAlloc failed!\n");
-            goto uhci_end;
-        }
-        DebugStr("Context allocated at 0x");
-        DebugU64((u64)ctx);
-        DebugStr("\n");
-        MemSet(ctx, 0, sizeof(UHCIContext));
-        ctx->HC = hc;
-        ctx->MemoryPool = &KernelPool;
-        ctx->HC->MemoryPool = &KernelPool;
-        DebugStr("ctx->MemoryPool = 0x");
-        DebugU64((u64)ctx->MemoryPool);
-        DebugStr("\n");
-        DebugStr("ctx->HC->MemoryPool = 0x");
-        DebugU64((u64)ctx->HC->MemoryPool);
-        DebugStr("\n");
-        ctx->HandleCompletion = OnRequestComplete;
-        ctx->HandleError = OnRequestError;
-        ctx->HandlePortChange = OnPortChange;
-        DebugStr("Calling UHCIInitialize...\n");
-        UHCIResult initResult = UHCIInitialize(ctx);
-        if (initResult != UHCI_OK) {
-            DebugStr("UHCIInitialize failed with code: ");
-            DebugI64(initResult);
-            DebugStr("\n");
-            goto uhci_end;
-        }
-        DebugStr("UHCIInitialize succeeded\n");
-        UHCIConfigure(ctx, 64, 0);
-        UHCIStart(ctx);
-        UHCIDumpStatus(ctx);
-        DebugStr("UHCI started. Checking ports...\r\n");
-        SystemBusySleepMs(300);
-        for (u8 p = 0; p < 2; p++) {
-            DebugStr("Port ");
-            DebugU8(p);
-            DebugStr(" initial status: 0x");
-            DebugU16(UHCIGetPortStatus(ctx, p));
-            DebugStr("\r\n");
-            UHCIClearPortChange(ctx, p);
-            SystemBusySleepMs(50);
-            u16 status = UHCIGetPortStatus(ctx, p);
-            if (status & UHCI_PORTSC_CCS) {
-                DebugStr("Device detected on port ");
-                DebugU8(p);
-                DebugStr(" -> Resetting...\r\n");
-                UHCIResetPort(ctx, p);
-                SystemBusySleepMs(100);
-                UHCIEnablePort(ctx, p);
-                SystemBusySleepMs(100);
-                status = UHCIGetPortStatus(ctx, p);
-                DebugStr("After reset status: 0x");
-                DebugU16(status);
-                DebugStr("\r\n");
-                if (status & UHCI_PORTSC_PE) {
-                    DebugStr("Trying Mouse on port ");
-                    DebugU8(p);
-                    DebugStr("\n");
-
-                    UhciMouse = USBMouseInit(ctx, p);
-                    if (UhciMouse) {
-                        DebugStr("Mouse success on port ");
-                        DebugU8(p);
-                        DebugStr("\n");
-                        TaskAdd((Task){.Active=1, .Arg=UhciMouse, .CallFunc=USBMousePollTask, .Name="UhciMouse", .IntervalNs=10000000}, 1);
-                    } else {
-                        DebugStr("Mouse failed on port ");
-                        DebugU8(p);
-                        DebugStr(", trying Keyboard...\n");
-
-                        UhciKeyboard = USBKeyboardInit(ctx, p);
-                        if (UhciKeyboard) {
-                            DebugStr("Keyboard success on port ");
-                            DebugU8(p);
-                            DebugStr("\n");
-                            TaskAdd((Task){.Active=1, .Arg=UhciKeyboard, .CallFunc=USBKeyboardPollTask, .Name="UhciKeyboard", .IntervalNs=10000000}, 1);
-                        }
-                    }
-                }
-            } else {
-                DebugStr("No device on port ");
-                DebugU8(p);
-                DebugStr("\r\n");
-            }
-        }
+    }else{
+        DebugStr("XHCI Not Found CykaBlyat\n");
     }
-uhci_end:
-    if (!ctx) DebugStr("UHCI init failed.\n");
-    else DebugStr("UHCI initialization completed.\r\n");
-    if (!UhciKeyboard) DebugStr("No UhciKeyboard\n");
-    if (!UhciMouse) DebugStr("No UhciMouse\n");
 
     DebugStr("Loop.\n");
-    u8 prevModifiers = 0;
-    u8 prevKeys[6] = {0};
     while (1){
         GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x7FFF));
         TaskPoll();
