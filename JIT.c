@@ -15,6 +15,12 @@ u64 GetVarCount(){
     return VarCount;
 }
 
+JITVar GetVar(u64 SerialNumber){
+    for (u64 Idx=0; Idx<VarEnd; Idx++){
+        if (Vars[Idx].SerialNumber == SerialNumber) return Vars[Idx];
+    }
+}
+
 void SetVarDataPoint(u64 SerialNumber, u64* DataPoint){
     for (u64 Idx=0; Idx<VarEnd; Idx++){
         if (Vars[Idx].SerialNumber == SerialNumber) {
@@ -85,6 +91,12 @@ void VarDel(u64 SerialNumber){
 
 u64 GetFuncCount(){
     return FuncCount;
+}
+
+JITFunc GetFunc(u64 SerialNumber){
+    for (u64 Idx=0; Idx<VarEnd; Idx++){
+        if (Funcs[Idx].SerialNumber == SerialNumber) return Funcs[Idx];
+    }
 }
 
 void SetFuncPoint(u64 SerialNumber, u64* FuncPoint){

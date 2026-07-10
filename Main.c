@@ -194,7 +194,6 @@ u64 GetXhciMmioBase() {
     u8 bus=0xFF,dev=0xFF,func=0xFF;
     PCIFindDeviceByClass(0x0C,0x03,0x30,&bus,&dev,&func);
     if (dev!=0xFF){
-        PCIEnableDevice(bus, dev, func);
         return PCIGetBARAddress(bus, dev, func, 0);
     }
     return 0;
@@ -437,10 +436,11 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     if (MaxMMIO > MaxAddress) {
         MaxAddress = MaxMMIO;
     }
-    if (MaxAddress < 0x0EFFFFFFFFULL) {
-        MaxAddress = 0x0EFFFFFFFFULL;
+    if (MaxAddress < 0x7FFFFFFFFFULL) {
+        MaxAddress = 0x7FFFFFFFFFULL;
         DebugChar('\n');
     }
+        
 
     DebugStr("\nMaxPhysicalAddress: ");DebugU64(MaxAddress);DebugChar('\n');
     DebugStr("BuildDynamicPageTable.\n");
@@ -461,41 +461,23 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     DebugStr("InitPool.\n");
     
     #define KERNEL_POOL_PAGES EFI_SIZE_TO_PAGES(1024 * 1024 * 1024)  
-    #define KERNEL_POOL_SIZE (KERNEL_POOL_PAGES * 4096)
+    #define KERNEL_POOL_SIZE (1024 * 1024 * 1024)
     
     EFI_PHYSICAL_ADDRESS pool_alloc_addr = 0;
-    u64 try_addresses[] = {0x100000, 0x200000, 0x300000, 0x400000, 0x500000, 0x600000, 0x700000, 0x800000, 0x900000, 0xA00000, 0xB00000, 0xC00000, 0xD00000, 0xE00000, 0xF00000, 0x1000000};
-    int tried = 0;
-    int max_tries = sizeof(try_addresses) / sizeof(u64);
     
-    for (tried = 0; tried < max_tries; tried++) {
-        pool_alloc_addr = try_addresses[tried];
-        DebugStr("Trying to allocate at 0x");
-        DebugU64(pool_alloc_addr);
-        DebugStr("\n");
-        
-        status = bs->AllocatePages(AllocateAddress, EfiRuntimeServicesData, KERNEL_POOL_PAGES, &pool_alloc_addr);
-        if (status == EFI_SUCCESS) {
-            DebugStr("Successfully allocated at 0x");
-            DebugU64(pool_alloc_addr);
-            DebugStr("\n");
-            break;
-        }
-    }
-    
+    DebugStr("All low memory allocation failed! Using fallback...\n");
+    pool_alloc_addr = 0xFFFFFFFFULL;
+    status = bs->AllocatePages(AllocateAnyPages, EfiRuntimeServicesData, KERNEL_POOL_PAGES, &pool_alloc_addr);
     if (status != EFI_SUCCESS) {
-        DebugStr("All low memory allocation failed! Using fallback...\n");
-        pool_alloc_addr = MaxAvailableAddress;
-        status = bs->AllocatePages(AllocateMaxAddress, EfiRuntimeServicesData, KERNEL_POOL_PAGES, &pool_alloc_addr);
-        if (status != EFI_SUCCESS) {
-            DebugStr("Allocate KernelPool failed!\n");
-            while(1) __asm__ volatile("cli\n\t hlt");
-        }
-        DebugStr("Fallback allocated at 0x");
-        DebugU64(pool_alloc_addr);
-        DebugStr("\n");
+        DebugStr("Allocate KernelPool failed!\n");
+        while(1) __asm__ volatile("cli\n\t hlt");
     }
-    
+    DebugStr("allocated at 0x");
+    DebugU64(pool_alloc_addr);
+    DebugStr("\n");
+    DebugStr("KERNEL_POOL_PAGES = ");
+    DebugU64(KERNEL_POOL_PAGES);
+    DebugChar('\n');
     InitPool(&KernelPool, KERNEL_POOL_SIZE, (void*)pool_alloc_addr);
     DebugStr("KernelPool initialized at 0x");
     DebugU64((u64)KernelPool.Head);
@@ -543,7 +525,13 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     DebugU64(KernelPool.Head->size);
     DebugStr(" is_free: ");
     DebugU8(KernelPool.Head->is_free);
-    DebugStr("\n");
+    DebugStr(" Next block size: ");
+    if (KernelPool.Head->next) {
+        DebugU64(KernelPool.Head->next->size);
+    } else {
+        DebugStr("NULL");
+    }
+    DebugChar('\n');
 
     if (!GopBack) {
         DebugStr("ERROR: GopBack is NULL!\n");
@@ -611,10 +599,29 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     }
     DebugStr("Init GTX960 Finish. End,Now All int Bug is Kernel Bug\n");
     DebugStr("Init XHCI.\n");
-    u64 XhciMMIOBase=GetXhciMmioBase();
+    u64 XhciMMIOBase = GetXhciMmioBase();
+    DebugStr("\nXHCI MMIO Base: ");
+    DebugU64(XhciMMIOBase);
+    DebugChar('\n');
     if (XhciMMIOBase){
         XhciController* Xhci=XhciInit(XhciMMIOBase);
         if(Xhci){
+            DebugStr("Polling events for device enumeration...\n");
+            XhciPollEvents(Xhci);
+            for (int i = 0; i < 1000; i++) __asm__ volatile("pause");
+            XhciPollEvents(Xhci);
+            DebugStr("Scanning ports...\n");
+            for (u32 port = 1; port <= XHCI_MAX_PORTS; port++) {
+                XhciPortRegs* Port = &Xhci->Ports[port - 1];
+                u32 Portsc = Port->Portsc;
+                DebugStr("Port "); DebugU32(port); DebugStr(" Portsc="); DebugU32(Portsc); DebugStr("\n");
+                if (Portsc & XHCI_PORTSC_CCS) {
+                    u8 Speed = (Portsc >> 10) & 0x0F;
+                    DebugStr("Port "); DebugU32(port); DebugStr(" connected, speed "); DebugU8(Speed); DebugStr("\n");
+                    u8 slot = XhciEnumerateDevice(Xhci, port, Speed);
+                    DebugStr("Enumerate returned slot "); DebugU8(slot); DebugStr("\n");
+                }
+            }
             ActiveKbd=KeyboardInit(Xhci);
             ActiveMouse=MouseInit(Xhci);
             TaskAdd((Task){.Active=1,.Arg=Xhci,.CallFunc=XhciPollEventsTask,.IntervalNs=1,.Target=NULL,.DelFunc=NULL,.Name="XHCI_POLL",.NextWaitNs=0},1);
@@ -627,6 +634,12 @@ __attribute__((force_align_arg_pointer)) void kernel_main() {
     while (1){
         GOPClear(HDR_Pack(0x0000, 0x0000, 0x0000, 0x7FFF));
         TaskPoll();
+
+        if (ActiveKbd){
+            if (KeyboardHasChar(ActiveKbd)) {
+                DebugChar(KeyboardGetChar(ActiveKbd));
+            }
+        }
 
         GOPRectFill((u32[2]){0, GopInfo.HorizontalResolution}, (u32[2]){0, GopInfo.VerticalResolution >> 5}, HDR_Pack(0x0000, 0xFFFF, 0xFFFF, 0x7FFF));
         GOPFlash();

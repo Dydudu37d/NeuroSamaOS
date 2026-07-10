@@ -61,7 +61,7 @@ run-whpx: boot.efi
 		-device qemu-xhci,id=xhci0 \
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \
-		-trace events=./tmp/uhci.trace
+		-trace events=./tmp/xhci.trace
 
 
 debug-whpx: boot.efi
@@ -81,7 +81,7 @@ debug-whpx: boot.efi
 		-device qemu-xhci,id=xhci0 \
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \
-		-trace events=./tmp/uhci.trace
+		-trace events=./tmp/xhci.trace
 
 run-kvm: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
@@ -102,7 +102,7 @@ run-kvm: boot.efi
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \
 		-d guest_errors,unimp -D qemu.log \
-		-no-reboot -no-shutdown -trace events=./tmp/uhci.trace
+		-no-reboot -no-shutdown -trace events=./tmp/xhci.trace
 
 
 debug-kvm: boot.efi
@@ -117,9 +117,9 @@ debug-kvm: boot.efi
 		-accel kvm \
 		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci1 \
-		-device usb-kbd,bus=uhci1.0,port=1 \
-		-device usb-mouse,bus=uhci1.0,port=2 \
+		-device piix3-usb-xhci,id=xhci1 \
+		-device usb-kbd,bus=xhci1.0,port=1 \
+		-device usb-mouse,bus=xhci1.0,port=2 \
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
@@ -127,7 +127,7 @@ debug-kvm: boot.efi
 		-device qemu-xhci,id=xhci0 \
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \
-		-trace events=./tmp/uhci.trace
+		-trace events=./tmp/xhci.trace
 
 run-tcg: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
@@ -141,12 +141,12 @@ run-tcg: boot.efi
 		-accel tcg \
 		-cpu Broadwell \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci-bus \
-		-device usb-mouse,bus=uhci-bus.0 \
-		-device usb-kbd,bus=uhci-bus.0 \
-		-device usb-tablet,bus=uhci-bus.0 \
+		-device piix3-usb-xhci,id=xhci-bus \
+		-device usb-mouse,bus=xhci-bus.0 \
+		-device usb-kbd,bus=xhci-bus.0 \
+		-device usb-tablet,bus=xhci-bus.0 \
 		-d guest_errors,unimp -D qemu.log \
-		-no-reboot -no-shutdown -trace events=./tmp/uhci.trace
+		-no-reboot -no-shutdown -trace events=./tmp/xhci.trace
 
 
 debug-tcg: boot.efi
@@ -161,18 +161,18 @@ debug-tcg: boot.efi
 		-accel tcg \
 		-cpu Broadwell,hle=off,rtm=off \
 		-boot order=d \
-		-device piix3-usb-uhci,id=uhci1 \
-		-device usb-kbd,bus=uhci1.0,port=1 \
-		-device usb-mouse,bus=uhci1.0,port=2 \
+		-device piix3-usb-xhci,id=xhci1 \
+		-device usb-kbd,bus=xhci1.0,port=1 \
+		-device usb-mouse,bus=xhci1.0,port=2 \
 		-s -S -no-reboot -no-shutdown \
 		-device intel-hda \
 		-device hda-duplex,audiodev=my-audio \
 		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
-		-device piix3-usb-uhci,id=uhci-bus \
-		-device usb-mouse,bus=uhci-bus.0 \
-		-device usb-kbd,bus=uhci-bus.0 \
-		-device usb-tablet,bus=uhci-bus.0 \
-		-trace events=./tmp/uhci.trace
+		-device piix3-usb-xhci,id=xhci-bus \
+		-device usb-mouse,bus=xhci-bus.0 \
+		-device usb-kbd,bus=xhci-bus.0 \
+		-device usb-tablet,bus=xhci-bus.0 \
+		-trace events=./tmp/xhci.trace
 
 iso: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)

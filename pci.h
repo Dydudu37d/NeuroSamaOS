@@ -69,14 +69,15 @@ static inline u64 PCIGetBARAddress(u8 Bus, u8 Slot, u8 Func, u8 BarIndex) {
     u32 barLow = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4);
     
     if (barLow & 0x1) {
-        return barLow & ~0x3;
+        return (u64)(barLow & ~0x3);
     }
     
     if ((barLow & 0x6) == 0x4) {
-        u32 barHigh = PCIReadDWORD(Bus, Slot, Func, 0x10 + BarIndex * 4 + 4);
-        return ((u64)barHigh << 32) | (barLow & ~0xF);
+        u32 barHigh = PCIReadDWORD(Bus, Slot, Func, 0x10 + (BarIndex + 1) * 4);
+        return ((u64)barHigh << 32) | ((u64)barLow & ~0xFULL);
     }
-    return barLow & ~0xF;
+    
+    return (u64)barLow & ~0xFULL;
 }
 
 static inline u64 PCIGetBARSize64(u8 Bus, u8 Slot, u8 Func, u8 BARIndex)
@@ -133,7 +134,6 @@ static inline void PCIScanBus(void)
 
 static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 TargetProgIF, u8 *OutBus, u8 *OutDev, u8 *OutFunc)
 {
-    // 默认返回无效值
     *OutBus = 0xFF;
     *OutDev = 0xFF;
     *OutFunc = 0xFF;
@@ -142,18 +142,17 @@ static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 Ta
     {
         for (u16 Dev = 0; Dev < 32; Dev++)
         {
-            for (u16 Func = 0; Func < 8; Func++)
+            u32 HeaderTypeReg = PCIReadDWORD(Bus, Dev, 0, 0x0C);
+            u8 HeaderType = (HeaderTypeReg >> 16) & 0xFF;
+            u16 MaxFunc = (HeaderType & 0x80) ? 8 : 1;
+
+            for (u16 Func = 0; Func < MaxFunc; Func++)
             {
-                if (Bus == 0 && Dev == 0 && Func == 0) {
-                    continue;
-                }
-                
                 u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
                 u16 Vendor = VendorDevice & 0xFFFF;
                 u16 Device = (VendorDevice >> 16) & 0xFFFF;
                 
                 if (Vendor == 0xFFFF) {
-                    if (Func == 0) break;
                     continue;
                 }
                 
@@ -175,16 +174,14 @@ static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 Ta
                     DebugU16(Device);
                     DebugStr(" ProgIF=0x");
                     DebugU8(ProgIF);
+                    DebugChar('\n');
                     
                     if (ProgIF == TargetProgIF) {
-                        DebugStr(" -> UHCI found!\n");
                         PCIEnableDevice(Bus, Dev, Func);
                         *OutBus = Bus;
                         *OutDev = Dev;
                         *OutFunc = Func;
                         return;
-                    } else {
-                        DebugStr(" -> Not UHCI (ProgIF not 0x00)\n");
                     }
                 }
             }

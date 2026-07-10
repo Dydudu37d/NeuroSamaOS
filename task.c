@@ -2,6 +2,7 @@
 #include "clock.h"
 #include "idt.h"
 #include "str.h"
+#include "debug.h"
 
 extern _Bool IDTGotError;
 

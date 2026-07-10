@@ -2,94 +2,13 @@
 #include "debug.h"
 #include "kmalloc.h"
 #include "str.h"
+#include "keyboard.h"
 
 extern AllocPool KernelPool;
 
 static void XhciRingEpDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId) {
     volatile u32* db = (volatile u32*)(Xhci->DoorbellBase + (SlotId * 4));
     *db = EpId;
-}
-
-static u8 UsbControlTransferMouse(XhciController* Xhci, u8 SlotId, u8 EpId,
-                                  u8 bmRequestType, u8 bRequest, u16 wValue,
-                                  u16 wIndex, u16 wLength, void* Buffer) {
-    XhciDeviceContext* devCtx = (XhciDeviceContext*)Xhci->Dcbaa->DevCtxPtr[SlotId];
-    u64 deq = devCtx->Ep[0].DequeueLow | ((u64)devCtx->Ep[0].DequeueHigh << 32);
-    XhciTrb* ep0Ring = (XhciTrb*)(deq & ~0xF);
-
-    u8 setupData[8] = {
-        bmRequestType, bRequest,
-        (u8)(wValue & 0xFF), (u8)(wValue >> 8),
-        (u8)(wIndex & 0xFF), (u8)(wIndex >> 8),
-        (u8)(wLength & 0xFF), (u8)(wLength >> 8)
-    };
-
-    u8* setupBuf = (u8*)AlignedAlloc(&KernelPool, 8, 64);
-    MemCopy(setupBuf, setupData, 8);
-
-    XhciTrb trbs[3];
-    MemSet(trbs, 0, sizeof(trbs));
-
-    trbs[0].ParameterLow = (u32)((u64)setupBuf & 0xFFFFFFFF);
-    trbs[0].ParameterHigh = (u32)((u64)setupBuf >> 32);
-    trbs[0].Status = 8;
-    trbs[0].Control = (XHCI_TRB_SETUP << 10) | XHCI_TRB_IDT | 1;
-
-    u8* dataBuf = 0;
-    int dataTrbIndex = -1;
-
-    if (wLength && (bmRequestType & USB_DIR_IN)) {
-        dataBuf = (u8*)AlignedAlloc(&KernelPool, wLength, 64);
-        trbs[1].ParameterLow = (u32)((u64)dataBuf & 0xFFFFFFFF);
-        trbs[1].ParameterHigh = (u32)((u64)dataBuf >> 32);
-        trbs[1].Status = wLength;
-        trbs[1].Control = (XHCI_TRB_DATA << 10) | (1 << 16) | 1;
-        dataTrbIndex = 1;
-    }
-
-    int statusIndex = (dataTrbIndex >= 0) ? 2 : 1;
-    trbs[statusIndex].ParameterLow = 0;
-    trbs[statusIndex].ParameterHigh = 0;
-    trbs[statusIndex].Status = 0;
-    trbs[statusIndex].Control = (XHCI_TRB_STATUS << 10) | XHCI_TRB_IOC | 1;
-    if (dataTrbIndex < 0 && (bmRequestType & USB_DIR_IN)) {
-        trbs[statusIndex].Control |= (1 << 16);
-    }
-
-    for (int i = 0; i <= statusIndex; i++) {
-        ep0Ring[i] = trbs[i];
-    }
-
-    XhciRingEpDoorbell(Xhci, SlotId, 1);
-
-    u32 timeout = 100000;
-    u8 success = 0;
-
-    while (timeout--) {
-        XhciTrb ev;
-        if (XhciReadEvent(Xhci, &ev)) {
-            u8 type = (ev.Control >> 10) & 0x3F;
-            if (type == XHCI_TRB_TRANSFER_EVENT) {
-                u8 slot = (ev.Control >> 24) & 0xFF;
-                if (slot == SlotId) {
-                    u8 code = (ev.Status >> 24) & 0xFF;
-                    if (code == XHCI_CMPLT_SUCCESS) {
-                        success = 1;
-                        break;
-                    }
-                }
-            }
-        }
-        __asm__ volatile ("pause");
-    }
-
-    if (success && dataBuf && Buffer) {
-        MemCopy(Buffer, dataBuf, wLength);
-    }
-
-    Free(&KernelPool, setupBuf);
-    if (dataBuf) Free(&KernelPool, dataBuf);
-    return success;
 }
 
 static void MouseSetupEndpoint(XhciController* Xhci, MouseDevice* Mouse) {
@@ -143,7 +62,7 @@ void MousePrepareTransfer(MouseDevice* Mouse) {
         link->ParameterLow = (u32)(Mouse->TrbRingPhys & 0xFFFFFFFF);
         link->ParameterHigh = (u32)(Mouse->TrbRingPhys >> 32);
         link->Status = 0;
-        link->Control = (XHCI_TRB_LINK << 10) | (1 << 1) | Mouse->Ccs;
+        link->Control = (XHCI_TRB_LINK << 10) | Mouse->Ccs;
         
         Mouse->Enqueue = 0;
         Mouse->Ccs ^= 1;
@@ -159,19 +78,22 @@ MouseDevice* MouseInit(XhciController *Xhci){
         if (!devCtx) continue;
 
         u8 deviceDescBuf[18];
-        if (XhciControlTransfer(Xhci, slot, 0x80, USB_REQ_GET_DESCRIPTOR, (USB_DT_DEVICE << 8), 0, 18, deviceDescBuf) != XHCI_CMPLT_SUCCESS) {
+        if (XhciControlTransfer(Xhci, slot, 0x80, USB_REQ_GET_DESCRIPTOR,
+                                (USB_DT_DEVICE << 8), 0, 18, deviceDescBuf) != XHCI_CMPLT_SUCCESS) {
             continue;
         }
 
         UsbDeviceDescriptor* deviceDesc = (UsbDeviceDescriptor*)deviceDescBuf;
         if (deviceDesc->bDeviceClass == 0 && deviceDesc->bNumConfigurations > 0) {
             u8 configDescBuf[256];
-            if (!UsbControlTransferMouse(Xhci, slot, 1, 0x80, 6, 0x0200, 0, 9, configDescBuf)) {
+            if (XhciControlTransfer(Xhci, slot, 0x80, USB_REQ_GET_DESCRIPTOR,
+                                    (USB_DT_CONFIG << 8), 0, 9, configDescBuf) != XHCI_CMPLT_SUCCESS) {
                 continue;
             }
 
             u16 totalLength = *(u16*)(configDescBuf + 2);
-            if (!UsbControlTransferMouse(Xhci, slot, 1, 0x80, 6, 0x0200, 0, totalLength, configDescBuf)) {
+            if (XhciControlTransfer(Xhci, slot, 0x80, USB_REQ_GET_DESCRIPTOR,
+                                    (USB_DT_CONFIG << 8), 0, totalLength, configDescBuf) != XHCI_CMPLT_SUCCESS) {
                 continue;
             }
 
@@ -210,7 +132,8 @@ MouseDevice* MouseInit(XhciController *Xhci){
             }
 
             if (found && epIn) {
-                if (!UsbControlTransferMouse(Xhci, slot, 1, 0x00, 9, deviceDesc->bNumConfigurations, 0, 0, 0)) {
+                if (XhciControlTransfer(Xhci, slot, 0x00, USB_REQ_SET_CONFIG,
+                                        deviceDesc->bNumConfigurations, 0, 0, NULL) != XHCI_CMPLT_SUCCESS) {
                     continue;
                 }
 
@@ -234,6 +157,7 @@ MouseDevice* MouseInit(XhciController *Xhci){
             }
         }
     }
+    return 0;
 }
 
 void MousePoll(MouseDevice* Mouse) {

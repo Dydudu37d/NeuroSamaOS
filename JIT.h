@@ -27,6 +27,7 @@ typedef struct{
 }__attribute__((packed)) JITFunc;
 
 u64 GetVarCount();
+JITVar GetVar(u64 SerialNumber);
 void SetVarDataPoint(u64 SerialNumber,u64* DataPoint);
 void* GetVarDataPoint(u64 SerialNumber);
 u8 GetVarType(u64 SerialNumber);
@@ -35,6 +36,7 @@ u64 VarAdd(JITVar Var);
 void VarDel(u64 SerialNumber);
 
 u64 GetFuncCount();
+JITFunc GetFunc(u64 SerialNumber);
 void SetFuncPoint(u64 SerialNumber,u64* FuncPoint);
 void* GetFuncPoint(u64 SerialNumber);
 u8 GetFuncType(u64 SerialNumber);

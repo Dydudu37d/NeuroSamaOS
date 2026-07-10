@@ -33,6 +33,7 @@ u64 XhciGetMmioBase(u8 Bus, u8 Slot, u8 Func) {
 }
 
 XhciController* XhciInit(u64 MmioBase) {
+    DebugStr("XHCI Init Start.\n");
     u32 hccparams1 = *(volatile u32*)((u64)MmioBase + 0x10);
     u32 xecp = (hccparams1 >> 16) & 0xFFFF;
     if (xecp != 0) {
@@ -79,7 +80,7 @@ XhciController* XhciInit(u64 MmioBase) {
         return NULL;
     }
 
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < 256; i++) {
         xhci->EpRings[i].Ring = NULL;
         xhci->EpRings[i].RingSize = 0;
         xhci->EpRings[i].Enqueue = 0;
@@ -104,14 +105,17 @@ XhciController* XhciInit(u64 MmioBase) {
     MemSet(xhci->CmdRing, 0, sizeof(XhciTrb) * xhci->CmdRingSize);
     xhci->CmdEnqueue = 0;
     xhci->CmdCycle = 1;
-    *(volatile u64*)((u64)opBase + 0x18) = (u64)xhci->CmdRing | 1ULL;
+    u64 crcr_val = (u64)xhci->CmdRing;
+    *(volatile u64*)((u64)opBase + 0x18) = crcr_val;
+    u64 crcr_read = *(volatile u64*)((u64)opBase + 0x18);
+    DebugStr("CRCR write: "); DebugU64(crcr_val); DebugStr(" read: "); DebugU64(crcr_read); DebugStr("\n");
 
     xhci->EvRingSize = 64;
     xhci->EvRing = (XhciTrb*)AlignedAlloc(&KernelPool, sizeof(XhciTrb) * xhci->EvRingSize, 64);
     MemSet(xhci->EvRing, 0, sizeof(XhciTrb) * xhci->EvRingSize);
     xhci->EvDequeue = 0;
     xhci->EvCycle = 1;
-
+    
     u32* erst = (u32*)AlignedAlloc(&KernelPool, 64, 64);
     MemSet(erst, 0, 64);
     u64 evRingPhys = (u64)xhci->EvRing;
@@ -138,6 +142,7 @@ XhciController* XhciInit(u64 MmioBase) {
 
     *(volatile u32*)((u64)opBase + 0x00) &= ~(1 << 2);
     *(volatile u32*)((u64)opBase + 0x00) |= (1 << 0);
+    *(volatile u64*)((u64)opBase + 0x18) = (u64)xhci->CmdRing;
 
     *(volatile u32*)((u64)irBase+0x00)=0;
     *(volatile u32*)((u64)irBase+0x04)=0;
@@ -149,46 +154,46 @@ XhciController* XhciInit(u64 MmioBase) {
     u32 hcsparams1 = *(volatile u32*)((u64)MmioBase + 0x04);
     XHCI_MAX_PORTS = (u8)((hcsparams1 >> 24) & 0xFF);
 
+    DebugStr("DoorbellBase: "); DebugU64(xhci->DoorbellBase); DebugStr("\n");
+
     timeout = 500000;
     while (timeout--) {
         u32 sts = *(volatile u32*)((u64)opBase + 0x04);
         if (!(sts & 1)) {
             DebugStr("XHCI SUCCESS: Running!\n");
+            DebugStr("XHCI Init End.\n");
             return xhci;
         }
         if (sts & 0x0000000C) {
             DebugStr("XHCI FATAL ERROR: 0x");
             DebugU32(sts);
+            DebugStr("XHCI Init End.\n");
             return NULL;
         }
         __asm__ volatile ("pause");
     }
     DebugStr("TimeOut\n");
+    DebugStr("XHCI Init End.\n");
     return NULL;
 }
 
 u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event) {
     XhciTrb* trb = &Xhci->EvRing[Xhci->EvDequeue];
     u32 control = trb->Control;
-
-    if ((control & 1) != Xhci->EvCycle) {
-        return 0;
+    if ((control & 1) == Xhci->EvCycle) {
+        MemCopy(Event, trb, sizeof(XhciTrb));
+        Xhci->EvDequeue++;
+        if (Xhci->EvDequeue >= Xhci->EvRingSize) {
+            Xhci->EvDequeue = 0;
+            Xhci->EvCycle ^= 1;
+        }
+        u64 erdp = (u64)&Xhci->EvRing[Xhci->EvDequeue];
+        erdp &= ~0x3FULL;
+        *(volatile u64*)(Xhci->RtBase + 0x38) = erdp | Xhci->EvCycle;
+        MemFullFlash();
+        return 1;
     }
-
-    MemCopy(Event, trb, sizeof(XhciTrb));
-
-    Xhci->EvDequeue++;
-    if (Xhci->EvDequeue >= Xhci->EvRingSize) {
-        Xhci->EvDequeue = 0;
-        Xhci->EvCycle ^= 1;
-    }
-
-    u64 erdp = (u64)&Xhci->EvRing[Xhci->EvDequeue];
-    erdp &= ~0xFULL;
-    *(volatile u64*)(Xhci->RtBase + 0x38) = erdp | 1;
-
-    MemFullFlash();
-    return 1;
+    return 0;
 }
 
 void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 SlotId) {
@@ -198,7 +203,7 @@ void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 Sl
     trb->ParameterLow = (u32)(Param & 0xFFFFFFFF);
     trb->ParameterHigh = (u32)(Param >> 32);
     trb->Status = Status;
-    trb->Control = ((u32)Type << 10) | ((u32)SlotId << 24) | Xhci->CmdCycle;
+    trb->Control = ((u32)Type << 10) | ((u32)SlotId << 24) | XHCI_TRB_IOC | Xhci->CmdCycle;
 
     Xhci->CmdEnqueue++;
     if (Xhci->CmdEnqueue >= Xhci->CmdRingSize - 1) {
@@ -206,31 +211,47 @@ void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 Sl
         link->ParameterLow = (u32)((u64)Xhci->CmdRing & 0xFFFFFFFF);
         link->ParameterHigh = (u32)((u64)Xhci->CmdRing >> 32);
         link->Status = 0;
-        link->Control = ((u32)XHCI_TRB_LINK << 10) | (1 << 1) | Xhci->CmdCycle;
+        link->Control = ((u32)XHCI_TRB_LINK << 10) | Xhci->CmdCycle;
 
         Xhci->CmdEnqueue = 0;
         Xhci->CmdCycle ^= 1;
     }
 
-    *(volatile u32*)(Xhci->DoorbellBase) = 0;
-    __asm__ volatile("mfence" ::: "memory");
+    *(volatile u32*)(Xhci->DoorbellBase) = 1;
+    __asm__ volatile("mfence");
+    (void)*(volatile u32*)((u64)Xhci->Op + 0x04);
     for (volatile int i = 0; i < 100; i++) __asm__ volatile("pause");
 }
 
 u8 XhciEnableSlot(XhciController* Xhci) {
     XhciSendCommand(Xhci, 0, 0, XHCI_TRB_ENABLE_SLOT, 0);
-
-    XhciTrb ev;
     u32 timeout = 5000000;
+    u64 crcr;
     while (timeout--) {
+        crcr = *(volatile u64*)((u64)Xhci->Op + 0x18);
+        DebugStr("CRCR="); DebugU64(crcr); DebugStr(" RCS="); DebugU32(crcr & 1); DebugStr("\n");
+        if (!(crcr & 1)) {
+            DebugStr("CRCR RCS=0, command consumed\n");
+            break;
+        }
+        __asm__ volatile("pause");
+    }
+    if (timeout == 0) {
+        DebugStr("Timeout waiting for CRCR RCS=0\n");
+        return 0;
+    }
+    XhciTrb ev;
+    timeout = 5000000;
+    while (timeout--) {
+        u32 ctrl = Xhci->EvRing[Xhci->EvDequeue].Control;
+        DebugStr("EvCtrl="); DebugU32(ctrl); DebugStr(" EvCycle="); DebugU32(Xhci->EvCycle); DebugStr("\n");
         if (XhciReadEvent(Xhci, &ev)) {
             u8 type = (ev.Control >> 10) & 0x3F;
+            DebugStr("Event type: "); DebugU8(type); DebugStr("\n");
             if (type == XHCI_TRB_COMMAND_COMPLETE) {
                 u8 slotId = (ev.Control >> 24) & 0xFF;
                 u8 code = (ev.Status >> 24) & 0xFF;
-                if (code == XHCI_CMPLT_SUCCESS) {
-                    return slotId;
-                }
+                if (code == XHCI_CMPLT_SUCCESS) return slotId;
                 return 0;
             }
         }
@@ -258,7 +279,7 @@ u8 XhciAddressDevice(XhciController* Xhci, u8 SlotId, XhciInputContext* InputCtx
 }
 
 static u8 XhciAllocEp0Ring(XhciController* Xhci, u8 SlotId) {
-    if (SlotId >= 32) return 0;
+    if (SlotId >= 256) return 0;
     
     XhciEpRing* ring = &Xhci->EpRings[SlotId];
     ring->RingSize = 64;
@@ -439,11 +460,11 @@ void XhciPollEvents(XhciController* Xhci) {
             case XHCI_TRB_TRANSFER_EVENT: {
                 if (CompletionCode != XHCI_CMPLT_SUCCESS) continue;
 
-                if (ActiveMouse && ((u64)ActiveMouse < 0x10000)) {
+                if (ActiveMouse && ((u64)ActiveMouse < 0x1000)) {
                     DebugStr("ActiveMouse is an invalid pointer!\n");
                     continue;
                 }
-                if (ActiveKbd && ((u64)ActiveKbd < 0x10000)) {
+                if (ActiveKbd && ((u64)ActiveKbd < 0x1000)) {
                     DebugStr("ActiveKbd is an invalid pointer!\n");
                     continue;
                 }
