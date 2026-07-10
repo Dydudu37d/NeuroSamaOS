@@ -229,28 +229,41 @@ XhciController* XhciInit(u64 MmioBase) {
 }
 
 u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event) {
+    if (!Xhci || !Event) return 0;
+    
     XhciTrb* trb = &Xhci->EvRing[Xhci->EvDequeue];
     FlushCache(trb, sizeof(XhciTrb));
     u32 control = trb->Control;
-    DebugStr("Check Event at idx "); DebugU32(Xhci->EvDequeue); DebugStr(" Control=0x"); DebugU32(control); DebugStr(" Cycle="); DebugU8(Xhci->EvCycle); DebugStr("\n");
-    if ((control & 1) == Xhci->EvCycle) {
-        MemCopy(Event, trb, sizeof(XhciTrb));
-        DebugStr("Event TRB: Low="); DebugU32(trb->ParameterLow);
-        DebugStr(" High="); DebugU32(trb->ParameterHigh);
-        DebugStr(" Status=0x"); DebugU32(trb->Status);
-        DebugStr(" Control=0x"); DebugU32(control); DebugStr("\n");
+    
+    if ((control & 1) != Xhci->EvCycle) {
+        return 0;
+    }
+    
+    u8 type = (control >> 10) & 0x3F;
+    
+    if (type == XHCI_TRB_LINK) {
         Xhci->EvDequeue++;
         if (Xhci->EvDequeue >= Xhci->EvRingSize) {
             Xhci->EvDequeue = 0;
+            Xhci->EvCycle ^= 1;
         }
-        u64 erdp = (u64)&Xhci->EvRing[Xhci->EvDequeue] & ~0xFULL;
-        erdp |= (Xhci->EvCycle ? (1ULL << 3) : 0);
-        *(volatile u64*)(Xhci->RtBase + 0x38) = erdp;
-        MemFullFlash();
-        DebugStr("!!! EVENT CONSUMED !!! Type="); DebugU8((Event->Control >> 10) & 0x3F); DebugStr("\n");
-        return 1;
+        return XhciReadEvent(Xhci, Event);
     }
-    return 0;
+
+    MemCopy(Event, trb, sizeof(XhciTrb));
+
+    Xhci->EvDequeue++;
+    if (Xhci->EvDequeue >= Xhci->EvRingSize) {
+        Xhci->EvDequeue = 0;
+        Xhci->EvCycle ^= 1;
+    }
+    
+    u64 erdp_addr = (u64)&Xhci->EvRing[Xhci->EvDequeue] & ~0xFULL;
+    erdp_addr |= (1ULL << 3);
+    *(volatile u64*)((u64)Xhci->RtBase + 0x38) = erdp_addr;
+    __asm__ volatile("mfence" ::: "memory");
+    
+    return 1;
 }
 
 void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 SlotId) {
@@ -385,9 +398,9 @@ u8 XhciEnumerateDevice(XhciController* Xhci, u8 PortId, u8 Speed) {
     XhciInputContext* input = (XhciInputContext*)inputCtx;
 
     input->InputCtrl.DropFlags = 0;
-    input->InputCtrl.AddFlags = (1 << 1) | (1 << 2);
+    input->InputCtrl.AddFlags = (1 << 0) | (1 << 1) | (1 << 2);
 
-    input->Slot.DevInfo = ((u32)Speed << 20) | 1;
+    input->Slot.DevInfo = ((u32)Speed << 20) | (u32)PortId;
     input->Slot.DevInfo2 = (u32)PortId;
     input->Slot.TtInfo = 0;
     input->Slot.DevState = 0;
