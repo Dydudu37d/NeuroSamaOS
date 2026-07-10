@@ -10,7 +10,7 @@ Erm......
 - FPU
 - JIT
 - HolyC-JIT
-- FishC-JIT
+- HolyFish-JIT
 - La57
 - VA=PA
 - XHCIz

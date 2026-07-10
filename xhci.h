@@ -173,9 +173,9 @@ typedef struct UsbEndpointDescriptor {
 #define USB_DT_INTERFACE 0x04
 #define USB_DT_ENDPOINT 0x05
 
-#define XHCI_TRB_SETUP_STAGE 0x41
-#define XHCI_TRB_DATA_STAGE 0x42
-#define XHCI_TRB_STATUS_STAGE 0x43
+#define XHCI_TRB_SETUP_STAGE   2
+#define XHCI_TRB_DATA_STAGE    3
+#define XHCI_TRB_STATUS_STAGE  4
 
 #define XHCI_PORTSC_CCS (1 << 0)
 #define XHCI_PORTSC_PED (1 << 1)
@@ -226,7 +226,7 @@ u64 XhciGetMmioBase(u8 Bus, u8 Slot, u8 Func);
 XhciController* XhciInit(u64 MmioBase);
 u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event);
 u8 XhciEnableSlot(XhciController* Xhci);
-u8 XhciAddressDevice(XhciController* Xhci, u8 SlotId, XhciInputContext* InputCtx);
+u8 XhciAddressDevice(XhciController* Xhci, u8 SlotId, XhciInputContext* InputCtx, u8 bsr);
 void XhciRingDoorbell(XhciController* Xhci, u8 SlotId, u8 EpId);
 void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 SlotId);
 void XhciScanPorts(XhciController* Xhci);
