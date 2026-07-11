@@ -155,7 +155,7 @@ XhciController* XhciInit(u64 MmioBase) {
     evLink->ParameterLow = (u32)((u64)xhci->EvRing & 0xFFFFFFFF);
     evLink->ParameterHigh = (u32)((u64)xhci->EvRing >> 32);
     evLink->Status = 0;
-    evLink->Control = (6 << 10) | (1 << 1) | 0;
+    evLink->Control = (6 << 10) | (1 << 1) | 1;
 
     FlushCache(xhci->EvRing, sizeof(XhciTrb) * xhci->EvRingSize);
     DebugStr("EvRing Phys: "); DebugU64((u64)xhci->EvRing); DebugStr("\n");
@@ -235,6 +235,17 @@ u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event) {
     FlushCache(trb, sizeof(XhciTrb));
     u32 control = trb->Control;
     
+    DebugStr("ReadEvent: idx="); DebugU32(Xhci->EvDequeue);
+    DebugStr(" control=0x"); DebugU32(control);
+    DebugStr(" cycle="); DebugU32(Xhci->EvCycle);
+    DebugStr(" match="); DebugU32((control & 1) == Xhci->EvCycle);
+    DebugStr("\n");
+    
+    if (control == 0) {
+        DebugStr("TRB is empty, waiting for controller...\n");
+        return 0;
+    }
+    
     if ((control & 1) != Xhci->EvCycle) {
         return 0;
     }
@@ -242,6 +253,7 @@ u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event) {
     u8 type = (control >> 10) & 0x3F;
     
     if (type == XHCI_TRB_LINK) {
+        DebugStr("Link TRB, skipping\n");
         Xhci->EvDequeue++;
         if (Xhci->EvDequeue >= Xhci->EvRingSize) {
             Xhci->EvDequeue = 0;
@@ -268,18 +280,21 @@ u8 XhciReadEvent(XhciController* Xhci, XhciTrb* Event) {
 
 void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 SlotId) {
     u64 crcr = *(volatile u64*)((u64)Xhci->Op + 0x18);
+    
     if (!(crcr & (1ULL << 5))) {
         Xhci->CmdEnqueue = 0;
         Xhci->CmdCycle = 1;
         u64 new_crcr = (u64)Xhci->CmdRing | (1ULL << 5);
         *(volatile u64*)((u64)Xhci->Op + 0x18) = new_crcr;
         DebugStr("CRCR restarted to "); DebugU64(new_crcr); DebugStr("\n");
+        
         u32 timeout = 100000;
         while (!(*(volatile u64*)((u64)Xhci->Op + 0x18) & (1ULL << 5)) && timeout--) {
             __asm__ volatile("pause");
         }
         if (timeout == 0) {
             DebugStr("CRCR restart timeout!\n");
+            return;
         }
     }
 
@@ -303,9 +318,9 @@ void XhciSendCommand(XhciController* Xhci, u64 Param, u32 Status, u8 Type, u8 Sl
         Xhci->CmdCycle ^= 1;
     }
 
-    __asm__ volatile("mfence");
+    __asm__ volatile("mfence" ::: "memory");
     *(volatile u32*)(Xhci->DoorbellBase) = 0;
-    __asm__ volatile("mfence");
+    __asm__ volatile("mfence" ::: "memory");
 }
 
 u8 XhciEnableSlot(XhciController* Xhci) {
@@ -335,8 +350,12 @@ u8 XhciEnableSlot(XhciController* Xhci) {
 }
 
 u8 XhciAddressDevice(XhciController* Xhci, u8 SlotId, XhciInputContext* InputCtx, u8 bsr) {
+    DebugStr("XhciAddressDevice: SlotId="); DebugU8(SlotId);
+    DebugStr(" bsr="); DebugU8(bsr); DebugStr("\n");
+
     FlushCache(InputCtx, 2048);
     __asm__ volatile("mfence" ::: "memory");
+
     u32 status = bsr ? (1 << 9) : 0;
     XhciSendCommand(Xhci, (u64)InputCtx, status, XHCI_TRB_ADDRESS_DEVICE, SlotId);
 
@@ -347,11 +366,13 @@ u8 XhciAddressDevice(XhciController* Xhci, u8 SlotId, XhciInputContext* InputCtx
             u8 type = (ev.Control >> 10) & 0x3F;
             if (type == XHCI_TRB_COMMAND_COMPLETE) {
                 u8 code = (ev.Status >> 24) & 0xFF;
+                DebugStr("Address Device Complete! Code=0x"); DebugU8(code); DebugStr("\n");
                 return code;
             }
         }
         __asm__ volatile("pause");
     }
+    DebugStr("Address Device Timeout!\n");
     return 0xFF;
 }
 
@@ -376,21 +397,32 @@ static u8 XhciAllocEp0Ring(XhciController* Xhci, u8 SlotId) {
     ring->Cycle = 1;
     ring->RingPhys = (u64)ring->Ring;
 
+    DebugStr("AllocEp0Ring: SlotId="); DebugU8(SlotId);
+    DebugStr(" RingPhys=0x"); DebugU64(ring->RingPhys);
+    DebugStr("\n");
+
     return 1;
 }
 
 u8 XhciEnumerateDevice(XhciController* Xhci, u8 PortId, u8 Speed) {
+    DebugStr("XhciEnumerateDevice: PortId="); DebugU8(PortId);
+    DebugStr(" Speed="); DebugU8(Speed); DebugStr("\n");
+
     u8 slotId = XhciEnableSlot(Xhci);
     if (slotId == 0) return 0;
 
-    if (!XhciAllocEp0Ring(Xhci, slotId)) {
-        return 0;
-    }
+    if (!XhciAllocEp0Ring(Xhci, slotId)) return 0;
 
     void* devCtx = AlignedAlloc(&KernelPool, 2048, 64);
     MemSet(devCtx, 0, 2048);
-    FlushCache(devCtx, 2048);
+    XhciDeviceContext* dev = (XhciDeviceContext*)devCtx;
+
+    dev->Slot.DevInfo = ((u32)Speed << 20) | (1u << 27);
+    dev->Slot.DevInfo2 = (u32)PortId;
+    dev->Slot.DevState = 0;
+
     Xhci->Dcbaa->DevCtxPtr[slotId] = (u64)devCtx;
+    FlushCache(devCtx, 2048);
     FlushCache(&Xhci->Dcbaa->DevCtxPtr[slotId], 8);
 
     void* inputCtx = AlignedAlloc(&KernelPool, 2048, 64);
@@ -398,58 +430,63 @@ u8 XhciEnumerateDevice(XhciController* Xhci, u8 PortId, u8 Speed) {
     XhciInputContext* input = (XhciInputContext*)inputCtx;
 
     input->InputCtrl.DropFlags = 0;
-    input->InputCtrl.AddFlags = (1 << 0) | (1 << 1) | (1 << 2);
+    input->InputCtrl.AddFlags = (1u << 0) | (1u << 1);
 
-    input->Slot.DevInfo = ((u32)Speed << 20) | (u32)PortId;
-    input->Slot.DevInfo2 = (u32)PortId;
+    input->Slot.DevInfo = ((u32)Speed << 20) | (1u << 27);
+    input->Slot.DevInfo2 = (PortId << 16);
     input->Slot.TtInfo = 0;
     input->Slot.DevState = 0;
 
-    u32 maxPacketSize = 8;
-    if (Speed == 4) maxPacketSize = 512;
-    else if (Speed == 3) maxPacketSize = 64;
-
     XhciEpRing* ring = &Xhci->EpRings[slotId];
 
-    input->Ep[0].EpInfo = (4 << 16) | (3 << 8);
-    input->Ep[0].EpInfo2 = maxPacketSize;
-    input->Ep[0].DequeueLow = (u32)(ring->RingPhys & 0xFFFFFFFF) | 1;
+    u32 maxPacketSize = (Speed == 4) ? 512 : (Speed == 3 ? 64 : 8);
+    u32 epType = 3;
+    u32 cErr = 3;
+
+    input->Ep[0].EpInfo  = 0;
+    input->Ep[0].EpInfo2 = (maxPacketSize << 16) | (epType << 3) | (cErr << 1);
+    input->Ep[0].DequeueLow  = ((u32)ring->RingPhys & 0xFFFFFFFF) | 1;
     input->Ep[0].DequeueHigh = (u32)(ring->RingPhys >> 32);
-    input->Ep[0].Reserved[0] = (8 << 16);
-    input->Ep[0].Reserved[1] = 0;
-    input->Ep[0].Reserved[2] = 0;
-    input->Ep[0].Reserved[3] = 0;
 
     DebugStr("=== Input Context Dump ===\n");
-    DebugStr("InputCtrl.AddFlags = "); DebugU32(input->InputCtrl.AddFlags); DebugStr("\n");
-    DebugStr("Slot.DevInfo = "); DebugU32(input->Slot.DevInfo); DebugStr("\n");
-    DebugStr("Slot.DevInfo2 = "); DebugU32(input->Slot.DevInfo2); DebugStr("\n");
-    DebugStr("Ep[0].EpInfo = "); DebugU32(input->Ep[0].EpInfo); DebugStr("\n");
-    DebugStr("Ep[0].EpInfo2 = "); DebugU32(input->Ep[0].EpInfo2); DebugStr("\n");
-    DebugStr("Ep[0].DequeueLow = "); DebugU32(input->Ep[0].DequeueLow); DebugStr("\n");
-    DebugStr("Ep[0].Reserved[0] = "); DebugU32(input->Ep[0].Reserved[0]); DebugStr("\n");
-    DebugStr("RingPhys = "); DebugU64(ring->RingPhys); DebugStr("\n");
+    DebugStr("AddFlags = 0x"); DebugU32(input->InputCtrl.AddFlags); DebugStr("\n");
+    DebugStr("Slot.DevInfo = 0x"); DebugU32(input->Slot.DevInfo); DebugStr("\n");
+    DebugStr("EP0 EpInfo = 0x"); DebugU32(input->Ep[0].EpInfo); DebugStr("\n");
+    DebugStr("EP0 EpInfo2 = 0x"); DebugU32(input->Ep[0].EpInfo2); DebugStr("\n");
+    DebugStr("EP0 Dequeue = 0x"); DebugU64(ring->RingPhys | 1); DebugStr("\n");
     DebugStr("==========================\n");
 
     FlushCache(inputCtx, 2048);
     __asm__ volatile("mfence" ::: "memory");
+
     u8 code = XhciAddressDevice(Xhci, slotId, inputCtx, 0);
     if (code != XHCI_CMPLT_SUCCESS) {
-        DebugStr("Address Device (BSR=0) Failed! Code=0x"); DebugU8(code); DebugStr("\n");
+        DebugStr("Address Device Failed! Code=0x"); DebugU8(code); DebugStr("\n");
         Free(&KernelPool, devCtx);
         Free(&KernelPool, inputCtx);
         return 0;
     }
 
-    DebugStr("Address Device Success!\n");
+    DebugStr("Address Device SUCCESS! Slot="); DebugU8(slotId); DebugStr("\n");
+
     Free(&KernelPool, inputCtx);
     XhciParseDevice(Xhci, slotId);
     return slotId;
 }
 
 u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRequest, u16 wValue, u16 wIndex, u16 wLength, void* Buffer) {
+    DebugStr("XhciControlTransfer: SlotId="); DebugU8(SlotId);
+    DebugStr(" bmRequestType=0x"); DebugU8(bmRequestType);
+    DebugStr(" bRequest=0x"); DebugU8(bRequest);
+    DebugStr(" wValue=0x"); DebugU16(wValue);
+    DebugStr(" wLength="); DebugU16(wLength);
+    DebugStr("\n");
+    
     XhciEpRing* ring = &Xhci->EpRings[SlotId];
-    if (!ring->Ring) return 0xFF;
+    if (!ring->Ring) {
+        DebugStr("ring->Ring is NULL!\n");
+        return 0xFF;
+    }
 
     *(volatile u32*)((u64)Xhci->Op + 0x04) = 0x0C;
 
@@ -500,12 +537,13 @@ u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRe
         enqueue++; \
     } while(0)
 
-    u32 trt = (wLength > 0) ? ((bmRequestType & 0x80) ? 2 : 1) : 3;
+    u32 trt = (wLength > 0) ? ((bmRequestType & 0x80) ? 2 : 1) : 0;
+    
     ADD_TRB_SIMPLE(
         ((u32)wValue << 16) | ((u32)bRequest << 8) | bmRequestType,
         ((u32)wLength << 16) | (u32)wIndex,
-        0,
-        (XHCI_TRB_SETUP_STAGE << 10) | (trt << 16)
+        (8 << 22), 
+        (XHCI_TRB_SETUP_STAGE << 10) | (trt << 16) | (1 << 6)
     );
 
     if (wLength > 0 && Buffer) {
@@ -519,7 +557,10 @@ u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRe
         );
     }
 
-    u32 statusDir = (wLength > 0) ? ((bmRequestType & 0x80) ? 0 : (1 << 16)) : 0;
+    u32 statusDir = 0;
+    if (wLength == 0) statusDir = (1 << 16);
+    else statusDir = (bmRequestType & 0x80) ? 0 : (1 << 16);
+    
     ADD_TRB_SIMPLE(0, 0, 0, (XHCI_TRB_STATUS_STAGE << 10) | statusDir | XHCI_TRB_IOC);
 
     #undef ADD_TRB_SIMPLE
@@ -530,7 +571,7 @@ u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRe
 
     FlushCache(ring->Ring, sizeof(XhciTrb) * ring->RingSize);
 
-    XhciRingDoorbell(Xhci, SlotId, 0);
+    XhciRingDoorbell(Xhci, SlotId, 1);
 
     usbsts = *(volatile u32*)((u64)Xhci->Op + 0x04);
     DebugStr("USBSTS after doorbell: 0x"); DebugU32(usbsts); DebugStr("\n");
@@ -548,28 +589,54 @@ u8 XhciControlTransfer(XhciController* Xhci, u8 SlotId, u8 bmRequestType, u8 bRe
         }
         __asm__ volatile("pause");
     }
+    DebugStr("ControlTransfer Timeout!\n");
     return 0xFF;
 }
 
 void XhciGetDeviceDescriptor(XhciController* Xhci, u8 SlotId, UsbDeviceDescriptor* Desc) {
+    DebugStr("XhciGetDeviceDescriptor: SlotId="); DebugU8(SlotId); DebugStr("\n");
     XhciControlTransfer(Xhci, SlotId, 0x80, USB_REQ_GET_DESCRIPTOR,
                         (USB_DT_DEVICE << 8) | 0, 0, sizeof(UsbDeviceDescriptor), Desc);
+    DebugStr("Device Descriptor: bLength="); DebugU8(Desc->bLength);
+    DebugStr(" bDescriptorType="); DebugU8(Desc->bDescriptorType);
+    DebugStr(" bcdUSB=0x"); DebugU16(Desc->bcdUSB);
+    DebugStr(" idVendor=0x"); DebugU16(Desc->idVendor);
+    DebugStr(" idProduct=0x"); DebugU16(Desc->idProduct);
+    DebugStr("\n");
 }
 
 void XhciParseDevice(XhciController* Xhci, u8 SlotId) {
+    DebugStr("XhciParseDevice: SlotId="); DebugU8(SlotId); DebugStr("\n");
+    
     UsbDeviceDescriptor devDesc;
     XhciGetDeviceDescriptor(Xhci, SlotId, &devDesc);
 
     u8 configHeader[9];
-    XhciControlTransfer(Xhci, SlotId, 0x80, USB_REQ_GET_DESCRIPTOR,
+    u8 code = XhciControlTransfer(Xhci, SlotId, 0x80, USB_REQ_GET_DESCRIPTOR,
                         (USB_DT_CONFIG << 8) | 0, 0, 9, configHeader);
+    DebugStr("Config Header transfer code=0x"); DebugU8(code); DebugStr("\n");
+    if (code != XHCI_CMPLT_SUCCESS) {
+        DebugStr("Get Config Header failed!\n");
+        return;
+    }
 
     u16 totalLen = *(u16*)(configHeader + 2);
+    DebugStr("Total Config Length="); DebugU16(totalLen); DebugStr("\n");
+    
     u8* configDesc = (u8*)Alloc(&KernelPool, totalLen);
-    if (!configDesc) return;
+    if (!configDesc) {
+        DebugStr("Alloc configDesc failed!\n");
+        return;
+    }
 
-    XhciControlTransfer(Xhci, SlotId, 0x80, USB_REQ_GET_DESCRIPTOR,
+    code = XhciControlTransfer(Xhci, SlotId, 0x80, USB_REQ_GET_DESCRIPTOR,
                         (USB_DT_CONFIG << 8) | 0, 0, totalLen, configDesc);
+    DebugStr("Config transfer code=0x"); DebugU8(code); DebugStr("\n");
+    if (code != XHCI_CMPLT_SUCCESS) {
+        DebugStr("Get Config failed!\n");
+        Free(&KernelPool, configDesc);
+        return;
+    }
 
     u8* ptr = configDesc;
     u8* end = ptr + totalLen;
@@ -578,8 +645,14 @@ void XhciParseDevice(XhciController* Xhci, u8 SlotId) {
         u8 descLen = ptr[0];
         u8 descType = ptr[1];
 
+        DebugStr("Descriptor: len="); DebugU8(descLen);
+        DebugStr(" type=0x"); DebugU8(descType); DebugStr("\n");
+
         if (descType == USB_DT_INTERFACE) {
             UsbInterfaceDescriptor* iface = (UsbInterfaceDescriptor*)ptr;
+            DebugStr("Interface: class=0x"); DebugU8(iface->bInterfaceClass);
+            DebugStr(" subclass=0x"); DebugU8(iface->bInterfaceSubClass);
+            DebugStr(" protocol=0x"); DebugU8(iface->bInterfaceProtocol); DebugStr("\n");
 
             if (iface->bInterfaceClass == USB_CLASS_HID &&
                 iface->bInterfaceSubClass == USB_SUBCLASS_BOOT) {
@@ -614,10 +687,17 @@ void XhciPollEvents(XhciController* Xhci) {
         DebugStr("USBSTS Error: "); DebugU32(usbsts); DebugStr("\n");
     }
     XhciTrb Event;
-    while (XhciReadEvent(Xhci, &Event)) {
+    u32 event_count = 0;
+    const u32 MAX_EVENTS_PER_POLL = 16;
+    while (event_count < MAX_EVENTS_PER_POLL && XhciReadEvent(Xhci, &Event)) {
+        event_count++;
         u8 Type = (Event.Control >> 10) & 0x3F;
         u8 SlotId = (Event.Control >> 24) & 0xFF;
         u8 CompletionCode = (Event.Status >> 24) & 0xFF;
+
+        DebugStr("XhciPollEvents: Type="); DebugU8(Type);
+        DebugStr(" SlotId="); DebugU8(SlotId);
+        DebugStr(" CompletionCode=0x"); DebugU8(CompletionCode); DebugStr("\n");
 
         switch (Type) {
             case XHCI_TRB_TRANSFER_EVENT: {
@@ -659,6 +739,7 @@ void XhciPollEvents(XhciController* Xhci) {
 
             case XHCI_TRB_PORT_STATUS_CHANGE: {
                 u32 PortId = (Event.ParameterLow >> 24) & 0xFF;
+                DebugStr("Port Status Change: PortId="); DebugU32(PortId); DebugStr("\n");
                 if (PortId == 0 || PortId > XHCI_MAX_PORTS) {
                     DebugStr("Invalid PortId: ");
                     DebugU32(PortId);

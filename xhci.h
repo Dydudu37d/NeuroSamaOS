@@ -59,6 +59,7 @@ typedef struct XhciEndpointContext {
 typedef struct XhciInputControlContext {
     u32 DropFlags;
     u32 AddFlags;
+    u32 Reserved[6];
 } __attribute__((packed)) XhciInputControlContext;
 
 typedef struct XhciTrb {
