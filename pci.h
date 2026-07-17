@@ -189,6 +189,77 @@ static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 Ta
     }
 }
 
+static inline void PCIFindDeviceByClassList(u8 TargetClass[], u8 TargetSubClass[], u8 TargetProgIF[], u64 ListSize, u8 *OutBus, u8 *OutDev, u8 *OutFunc)
+{
+    *OutBus = 0xFF;
+    *OutDev = 0xFF;
+    *OutFunc = 0xFF;
+    
+    for (u16 Bus = 0; Bus < 256; Bus++)
+    {
+        for (u16 Dev = 0; Dev < 32; Dev++)
+        {
+            u32 HeaderTypeReg = PCIReadDWORD(Bus, Dev, 0, 0x0C);
+            u8 HeaderType = (HeaderTypeReg >> 16) & 0xFF;
+            u16 MaxFunc = (HeaderType & 0x80) ? 8 : 1;
+
+            for (u16 Func = 0; Func < MaxFunc; Func++)
+            {
+                u32 VendorDevice = PCIReadDWORD(Bus, Dev, Func, 0x00);
+                u16 Vendor = VendorDevice & 0xFFFF;
+                u16 Device = (VendorDevice >> 16) & 0xFFFF;
+                
+                if (Vendor == 0xFFFF) {
+                    continue;
+                }
+                
+                u32 ClassRev = PCIReadDWORD(Bus, Dev, Func, 0x08);
+                u8 ClassCode = (ClassRev >> 24) & 0xFF;
+                u8 SubClass = (ClassRev >> 16) & 0xFF;
+                u8 ProgIF = (ClassRev >> 8) & 0xFF;
+
+                for (u64 Idx=0;Idx<ListSize;Idx++){
+
+                    if (ClassCode == TargetClass[Idx] && SubClass == TargetSubClass[Idx]) {
+                        DebugStr("Found controller: Bus=");
+                        DebugU8(Bus);
+                        DebugStr(" Dev=");
+                        DebugU8(Dev);
+                        DebugStr(" Func=");
+                        DebugU8(Func);
+                        DebugStr(" Vendor=0x");
+                        DebugU16(Vendor);
+                        DebugStr(" Device=0x");
+                        DebugU16(Device);
+                        DebugStr(" ProgIF=0x");
+                        DebugU8(ProgIF);
+                        DebugStr(" TargetClass=0x");
+                        DebugU8(TargetClass[Idx]);
+                        DebugStr(" TargetSubClass=0x");
+                        DebugU8(TargetSubClass[Idx]);
+                        DebugStr(" TargetProgIF=0x");
+                        DebugU8(TargetProgIF[Idx]);
+                        DebugChar('\n');
+                        
+                        if (ProgIF == TargetProgIF[Idx]) {
+                            DebugStr("ProgIF==TargetProgIF.Enable.\n");
+                            DebugStr("TargetProgIF=0x");
+                            DebugU8(TargetProgIF[Idx]);
+                            DebugChar('\n');
+                            PCIEnableDevice(Bus, Dev, Func);
+                            *OutBus = Bus;
+                            *OutDev = Dev;
+                            *OutFunc = Func;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+
 static inline void PCIScanBusRecursive(u8 Bus)
 {
     for (u8 Dev = 0; Dev < 32; Dev++)

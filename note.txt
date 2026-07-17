@@ -133,3 +133,15 @@
     关于指令填充：在连续发送大量指令时，如果你不插空指令（NOP），Codec 可能没空回你，所以发一条指令后，故意在 CORB 里塞一条 0x00000000 的空指令，再发下一条。
 
     关于 RIRB 轮询：记得每次读完响应后，把 RIRBSTS 的响应标志 RW1C 写 1 清掉，不然下次你会读到旧数据。
+
+typedef enum {
+    CORB_2Entry=0b00,
+    CORB_16Entry=0b01,
+    CORB_256Entry=0b10,
+    CORB_NoWayBro_Its_RESERVED_And_ERROR=0b11
+} __attribute__((packed)) CORB_SIZE_TYPE;
+
+typedef enum {
+    RATE_48hz=0b0,
+    RATE_44Point1hz=0b1,
+} __attribute__((packed)) FMT_BASE_RATE;

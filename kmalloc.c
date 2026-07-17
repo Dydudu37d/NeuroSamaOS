@@ -9,6 +9,9 @@ static void* DoSplit(AllocPool* Pool, AllocBlock* curr, void* aligned_ptr, size_
     
     if (data_start > block_start) {
         size_t padding = data_start - block_start;
+        if (padding < sizeof(AllocBlock) + 8) {
+            return NULL;
+        }
         AllocBlock* prefix = curr;
         
         curr = (AllocBlock*)(data_start - sizeof(AllocBlock));
@@ -26,7 +29,8 @@ static void* DoSplit(AllocPool* Pool, AllocBlock* curr, void* aligned_ptr, size_
     
     size_t remaining = curr->size - size;
     if (remaining >= sizeof(AllocBlock) + 8) {
-        AllocBlock* new_block = (AllocBlock*)(data_start + size);
+        u64 curr_data = (u64)curr + sizeof(AllocBlock);
+        AllocBlock* new_block = (AllocBlock*)(curr_data + size);
         new_block->size = remaining - sizeof(AllocBlock);
         new_block->is_free = 1;
         new_block->is_aligned = 0;
@@ -69,10 +73,6 @@ void* AlignedAlloc(AllocPool* Pool, size_t size, size_t align) {
         if (curr->is_free && curr->size >= size) {
             u64 block_start = (u64)curr + sizeof(AllocBlock);
             u64 aligned_ptr = (block_start + align - 1) & ~(align - 1);
-            
-            while (aligned_ptr > block_start && (aligned_ptr - block_start) < (sizeof(AllocBlock) + 8)) {
-                aligned_ptr += align;
-            }
             
             size_t total_needed = (aligned_ptr - block_start) + size;
             if (curr->size >= total_needed) {
@@ -142,10 +142,6 @@ void* MaxAlignedAlloc(AllocPool* Pool, size_t size, size_t align, u64 MaxPos) {
         if (curr->is_free && curr->size >= size) {
             u64 block_start = (u64)curr + sizeof(AllocBlock);
             u64 aligned_ptr = (block_start + align - 1) & ~(align - 1);
-            
-            while (aligned_ptr > block_start && (aligned_ptr - block_start) < (sizeof(AllocBlock) + 8)) {
-                aligned_ptr += align;
-            }
             
             size_t total_needed = (aligned_ptr - block_start) + size;
             if (curr->size >= total_needed && aligned_ptr <= MaxPos && aligned_ptr + size <= MaxPos) {

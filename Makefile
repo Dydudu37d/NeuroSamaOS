@@ -123,7 +123,7 @@ debug-kvm: boot.efi
 		-s -S -no-reboot -no-shutdown \
 		-audiodev pa,id=Sound \
 		-device intel-hda \
-		-device hda-duplex,audiodev=Sound \
+		-device hda-output,audiodev=Sound \
 		-device qemu-xhci,id=xhci0 \
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \

@@ -73,9 +73,9 @@ typedef struct {
     union {
         u32 U;
         struct {
-            u32 rsvdpRsvd1               : 24;
+            u32 rsvdpRsvd1            : 24;
             u32 rwUnsolicitedResponse : 1;
-            u32 rsvdpRsvd2               : 6;
+            u32 rsvdpRsvd2            : 6;
             u32 rwFlushControl        : 1;
             u32 rwsControllerReset    : 1;
         };
@@ -86,7 +86,7 @@ typedef struct {
     union {
         u16 U;
         struct {
-            u16 rsvdpRsvd1         : 1;
+            u16 rsvdpRsvd1      : 1;
             u16 rwsSerialDataIn : 15;
         };
     };
@@ -96,7 +96,7 @@ typedef struct {
     union {
         u16 U;
         struct {
-            u16 rsvdzRsvd1           : 1;
+            u16 rsvdzRsvd1        : 1;
             u16 rw1csSerialDataIn : 15;
         };
     };
@@ -107,7 +107,7 @@ typedef struct {
         u16 U;
         struct {
             u16 rsvdzRsvd1    : 14;
-            u16 rw1cFSTS : 1;
+            u16 rw1cFSTS      : 1;
             u16 rsvdzRsvd2    : 1;
         };
     };
@@ -130,7 +130,7 @@ typedef struct {
             union {
                 u32 rwStreamInterruptEnable : 32;
                 struct {
-                    u32 rsvdzRsvd1                   : 24;
+                    u32 rsvdzRsvd1                 : 24;
                     u32 rwBidirectionalStreaming11 : 1;
                     u32 rwInputStream31            : 1;
                     u32 rwInputStream21            : 1;
@@ -446,6 +446,7 @@ typedef struct {
     HDAudioRegINPAY INPAY;
     HDAudioRegGCTL GCTL;
     HDAudioRegWAKEEN WAKEEN;
+    u8 RsvdToStatesTS[0x20 - 0x12];
     HDAudioRegSTATESTS STATESTS;
     HDAudioRegGSTS GSTS;
     u8 Rsvd1[6];
@@ -495,21 +496,49 @@ typedef struct {
 } HDAudioStreamContext;
 
 typedef struct {
-    u32 Response;
-    u32 ResponseEX;
-} __attribute__((packed)) HDARirbEntry;
+    union {
+        u64 U;
+        
+        struct {
+            union {
+                u32 roResponseLow;
+            };
+            union {
+                u32 roResponseHigh;
+                struct {
+                    u32 roResponseIndex : 4;
+                    u32 roUnsolicited   : 1;
+                    u32 roRsvdEX        : 23;
+                    u32 roCodecAddr     : 4;
+                };
+            };
+        };
+    };
+} __attribute__((packed)) HDAudioRirbEntry;
+
+typedef struct {
+    union {
+        u32 U;
+        struct {
+            u32 rwParameter   : 8;
+            u32 rwVerbId      : 12;
+            u32 rwNodeId      : 8;
+            u32 rwCodecAddr   : 4;
+        };
+    };
+} __attribute__((packed)) HDAudioCorbEntry;
 
 typedef struct {
     volatile HDAudioRegs* Regs; 
     u64 Bar0;
-    u8  NumStreams;
-    HDAudioStreamContext Streams[30];
+    u8 NumStreams;
+    u16 NumCORB;
     
     struct {
-        u32* Corb;
-        u16  CorbWritePtr;
-        HDARirbEntry* Rirb;
-        u16  RirbReadPtr;
+        HDAudioCorbEntry* Corb;
+        HDAudioRegCORBWritePtr CorbWritePtr;
+        HDAudioRirbEntry* Rirb;
+        HDAudioRegRIRBWritePtr RirbReadPtr;
         volatile u32* Lpib; 
     } DmaAlloc;
 

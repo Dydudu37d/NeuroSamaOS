@@ -198,7 +198,7 @@ void MemSet64(void* D, const u64 S, size_t size) {
 
 void Bit64Str(u64 N,char* Buf){
     for (s64 idx=63;idx>=0;idx--){
-        Buf[idx]=((N>>idx)&1)+48;
+        Buf[63 - idx] = ((N >> idx) & 1) + 48;
     }
     Buf[64]='\0';
 }
