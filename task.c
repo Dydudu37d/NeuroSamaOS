@@ -3,8 +3,10 @@
 #include "idt.h"
 #include "str.h"
 #include "debug.h"
+#include "Context.h"
 
 extern _Bool IDTGotError;
+extern RegContext MainGlobalContext;
 
 Task Tasks[MaxTaskCount]={0};
 
@@ -29,6 +31,7 @@ void TaskDel(u8 IdxTask){
 
 void TaskPoll(void){
     u64 Now = SystemGetTimeNano();
+    SaveContext(&MainGlobalContext);
     
     for (u16 i = 0; i < MaxTaskCount; i++){
         if (!Tasks[i].Active) continue;
@@ -50,6 +53,7 @@ void TaskPoll(void){
             if (IDTGotError){
                 Tasks[i].Active = false;
                 IDTCloseError();
+                LoadContext(MainGlobalContext);
             }
         }
     }

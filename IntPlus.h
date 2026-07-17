@@ -286,6 +286,8 @@ typedef struct {
 
 typedef signed __int128 Cs128;
 typedef unsigned __int128 Cu128;
+typedef Cu128 GNU_u128;
+typedef Cs128 GNU_s128;
 
 typedef u64 uv256 __attribute__((vector_size(32)));
 typedef u64 uv128 __attribute__((vector_size(16)));

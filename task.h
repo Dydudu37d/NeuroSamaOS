@@ -7,7 +7,7 @@
 #define SystemTaskStart 0
 #define SystemTaskEnd 49
 
-#define ERROR(x) x>MaxTaskCount
+#define ERROR(x) (x>=MaxTaskCount)
 
 typedef struct{
     void* (*CallFunc)(void* ArgList);

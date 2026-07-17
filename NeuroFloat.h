@@ -9,7 +9,7 @@ typedef struct {
             u8 Mantissa : 4;
             u8 Point    : 3;
             u8 MSB      : 1;
-        }__attribute__((packed));
+        } __attribute__((packed));
     };
 } FP8;
 
@@ -20,7 +20,7 @@ typedef struct {
             u16 Mantissa : 11;
             u16 Point    : 4;
             u16 MSB      : 1;
-        }__attribute__((packed));
+        } __attribute__((packed));
     };
 } FP16;
 
@@ -31,7 +31,7 @@ typedef struct {
             u32 Mantissa : 26;
             u32 Point    : 5;
             u32 MSB      : 1;
-        }__attribute__((packed));
+        } __attribute__((packed));
     };
 } FP32;
 
@@ -42,9 +42,60 @@ typedef struct {
             u64 Mantissa : 57;
             u64 Point    : 6;
             u64 MSB      : 1;
-        }__attribute__((packed));
+        } __attribute__((packed));
     };
 } FP64;
+
+typedef struct {
+    union {
+        u64 U;
+        struct {
+            u64 Float    : 59;
+            u64 Int      : 4;
+            u64 MSB      : 1;
+        } __attribute__((packed));
+    };
+} S1Q4F59;
+
+static inline void FP8Align(FP8* F1, FP8* F2) {
+    if (F1->Point > F2->Point) {
+        F2->Mantissa <<= (F1->Point - F2->Point);
+        F2->Point = F1->Point;
+    } else if (F2->Point > F1->Point) {
+        F1->Mantissa <<= (F2->Point - F1->Point);
+        F1->Point = F2->Point;
+    }
+}
+
+static inline void FP16Align(FP16* F1, FP16* F2) {
+    if (F1->Point > F2->Point) {
+        F2->Mantissa <<= (F1->Point - F2->Point);
+        F2->Point = F1->Point;
+    } else if (F2->Point > F1->Point) {
+        F1->Mantissa <<= (F2->Point - F1->Point);
+        F1->Point = F2->Point;
+    }
+}
+
+static inline void FP32Align(FP32* F1, FP32* F2) {
+    if (F1->Point > F2->Point) {
+        F2->Mantissa <<= (F1->Point - F2->Point);
+        F2->Point = F1->Point;
+    } else if (F2->Point > F1->Point) {
+        F1->Mantissa <<= (F2->Point - F1->Point);
+        F1->Point = F2->Point;
+    }
+}
+
+static inline void FP64Align(FP64* F1, FP64* F2) {
+    if (F1->Point > F2->Point) {
+        F2->Mantissa <<= (F1->Point - F2->Point);
+        F2->Point = F1->Point;
+    } else if (F2->Point > F1->Point) {
+        F1->Mantissa <<= (F2->Point - F1->Point);
+        F1->Point = F2->Point;
+    }
+}
 
 static inline _Bool FP8PrecisionIs(FP8 F1, FP8 F2){
     return F1.Point == F2.Point;
@@ -62,6 +113,9 @@ static inline _Bool FP64PrecisionIs(FP64 F1, FP64 F2){
     return F1.Point == F2.Point;
 }
 
+static inline _Bool S1Q4F59PrecisionIs(S1Q4F59 F1, S1Q4F59 F2){
+    return 1;
+}
 
 static inline _Bool FP8Is(FP8 F1, FP8 F2){
     if (F1.MSB != F2.MSB) {
@@ -111,7 +165,6 @@ static inline _Bool FP32Is(FP32 F1, FP32 F2){
     }
 }
 
-
 static inline _Bool FP64Is(FP64 F1, FP64 F2){
     if (F1.MSB != F2.MSB) {
         return (F1.Mantissa == 0 && F2.Mantissa == 0);
@@ -130,8 +183,13 @@ static inline _Bool FP64Is(FP64 F1, FP64 F2){
     }
 }
 
+static inline _Bool S1Q4F59Is(S1Q4F59 F1, S1Q4F59 F2){
+    return (F1.U == F2.U);
+}
+
 static inline FP8 FP8Add(FP8 F1, FP8 F2){
     FP8 result;
+    FP8Align(&F1, &F2);
     s32 v1 = F1.MSB ? -(s32)F1.Mantissa : (s32)F1.Mantissa;
     s32 v2 = F2.MSB ? -(s32)F2.Mantissa : (s32)F2.Mantissa;
     s32 sum = v1 + v2;
@@ -148,6 +206,7 @@ static inline FP8 FP8Add(FP8 F1, FP8 F2){
 
 static inline FP16 FP16Add(FP16 F1, FP16 F2){
     FP16 result;
+    FP16Align(&F1, &F2);
     s32 v1 = F1.MSB ? -(s32)F1.Mantissa : (s32)F1.Mantissa;
     s32 v2 = F2.MSB ? -(s32)F2.Mantissa : (s32)F2.Mantissa;
     s32 sum = v1 + v2;
@@ -164,6 +223,7 @@ static inline FP16 FP16Add(FP16 F1, FP16 F2){
 
 static inline FP32 FP32Add(FP32 F1, FP32 F2){
     FP32 result;
+    FP32Align(&F1, &F2);
     s64 v1 = F1.MSB ? -(s64)F1.Mantissa : (s64)F1.Mantissa;
     s64 v2 = F2.MSB ? -(s64)F2.Mantissa : (s64)F2.Mantissa;
     s64 sum = v1 + v2;
@@ -180,6 +240,7 @@ static inline FP32 FP32Add(FP32 F1, FP32 F2){
 
 static inline FP64 FP64Add(FP64 F1, FP64 F2){
     FP64 result;
+    FP64Align(&F1, &F2);
     s64 v1 = F1.MSB ? -(s64)F1.Mantissa : (s64)F1.Mantissa;
     s64 v2 = F2.MSB ? -(s64)F2.Mantissa : (s64)F2.Mantissa;
     s64 sum = v1 + v2;
@@ -192,6 +253,12 @@ static inline FP64 FP64Add(FP64 F1, FP64 F2){
     }
     result.Point = F1.Point;
     return result;
+}
+
+static inline S1Q4F59 S1Q4F59Add(S1Q4F59 F1, S1Q4F59 F2){
+    S1Q4F59 Ret = {0};
+    Ret.U = (F1.U + F2.U);
+    return Ret;
 }
 
 static inline void FP8Split(FP8 F, u8* integer, u8* fraction) {
@@ -239,10 +306,18 @@ static inline void FP64Split(FP64 F, u64* integer, u64* fraction) {
     }
 }
 
+static inline _Bool S1Q4F59Split(S1Q4F59 F, u64* integer, u64* fraction){
+    *integer = F.Int;
+    *fraction = F.Float;
+    return 1;
+}
+
 static inline FP8 FP8Sub(FP8 F1, FP8 F2){
     FP8 result;
+    FP8Align(&F1, &F2);
+    F2.MSB = !F2.MSB;
     s32 v1 = F1.MSB ? -(s32)F1.Mantissa : (s32)F1.Mantissa;
-    s32 v2 = F2.MSB ? -(s32)(~F2.Mantissa) : (s32)(~F2.Mantissa);
+    s32 v2 = F2.MSB ? -(s32)F2.Mantissa : (s32)F2.Mantissa;
     s32 sum = v1 + v2;
     if (sum < 0) {
         result.MSB = 1;
@@ -257,8 +332,10 @@ static inline FP8 FP8Sub(FP8 F1, FP8 F2){
 
 static inline FP16 FP16Sub(FP16 F1, FP16 F2){
     FP16 result;
+    FP16Align(&F1, &F2);
+    F2.MSB = !F2.MSB;
     s32 v1 = F1.MSB ? -(s32)F1.Mantissa : (s32)F1.Mantissa;
-    s32 v2 = F2.MSB ? -(s32)(~F2.Mantissa) : (s32)(~F2.Mantissa);
+    s32 v2 = F2.MSB ? -(s32)F2.Mantissa : (s32)F2.Mantissa;
     s32 sum = v1 + v2;
     if (sum < 0) {
         result.MSB = 1;
@@ -273,8 +350,10 @@ static inline FP16 FP16Sub(FP16 F1, FP16 F2){
 
 static inline FP32 FP32Sub(FP32 F1, FP32 F2){
     FP32 result;
+    FP32Align(&F1, &F2);
+    F2.MSB = !F2.MSB;
     s64 v1 = F1.MSB ? -(s64)F1.Mantissa : (s64)F1.Mantissa;
-    s64 v2 = F2.MSB ? -(s64)(~F2.Mantissa) : (s64)(~F2.Mantissa);
+    s64 v2 = F2.MSB ? -(s64)F2.Mantissa : (s64)F2.Mantissa;
     s64 sum = v1 + v2;
     if (sum < 0) {
         result.MSB = 1;
@@ -289,8 +368,10 @@ static inline FP32 FP32Sub(FP32 F1, FP32 F2){
 
 static inline FP64 FP64Sub(FP64 F1, FP64 F2){
     FP64 result;
+    FP64Align(&F1, &F2);
+    F2.MSB = !F2.MSB;
     s64 v1 = F1.MSB ? -(s64)F1.Mantissa : (s64)F1.Mantissa;
-    s64 v2 = F2.MSB ? -(s64)(~F2.Mantissa) : (s64)(~F2.Mantissa);
+    s64 v2 = F2.MSB ? -(s64)F2.Mantissa : (s64)F2.Mantissa;
     s64 sum = v1 + v2;
     if (sum < 0) {
         result.MSB = 1;
@@ -301,6 +382,12 @@ static inline FP64 FP64Sub(FP64 F1, FP64 F2){
     }
     result.Point = F1.Point;
     return result;
+}
+
+static inline S1Q4F59 S1Q4F59Sub(S1Q4F59 F1, S1Q4F59 F2){
+    S1Q4F59 Ret = {0};
+    Ret.U = (F1.U - F2.U);
+    return Ret;
 }
 
 static inline _Bool FP8IsExact(FP8 F1, FP8 F2){
@@ -316,5 +403,9 @@ static inline _Bool FP32IsExact(FP32 F1, FP32 F2){
 }
 
 static inline _Bool FP64IsExact(FP64 F1, FP64 F2){
+    return F1.U == F2.U;
+}
+
+static inline _Bool S1Q4F59IsExact(S1Q4F59 F1, S1Q4F59 F2){
     return F1.U == F2.U;
 }

@@ -1,87 +1,527 @@
 #pragma once
 
 #include "int.h"
-#include "pci.h"
 
-typedef struct HdaRegs
-{
-    volatile u32 Gcap;
-    volatile u8 Vmin;
-    volatile u8 Vmaj;
-    volatile u16 Outpay;
-    volatile u16 Inpay;
-    volatile u32 Gctl;
-    volatile u16 Wakeen;
-    volatile u16 Statests;
-    volatile u16 Gsts;
-    volatile u8 Reserved[6];
-    volatile u32 Intctl;
-    volatile u32 Intsts;
-    volatile u8 Reserved2[8];
-    volatile u32 Walclk;
-    volatile u8 Reserved3[4];
-    volatile u32 Ssync;
-    volatile u8 Reserved4[4];
-    volatile u32 Corblbase;
-    volatile u32 Corbubase;
-    volatile u16 Corbwp;
-    volatile u16 Corbrp;
-    volatile u8 Corbctl;
-    volatile u8 Corbsts;
-    volatile u8 Corbsize;
-    volatile u8 Reserved5[3];
-    volatile u32 Rirblbase;
-    volatile u32 Rirbubbase;
-    volatile u16 Rirbwp;
-    volatile u16 Rintcnt;
-    volatile u8 Rirbctl;
-    volatile u8 Rirbsts;
-    volatile u8 Rirbsize;
-    volatile u8 Reserved6[5];
-    volatile u32 Ico;
-    volatile u32 Ici;
-    volatile u16 Ics;
-} __attribute__((packed)) HdaRegs;
+#define VMIN_RESET   0x00
+#define VMAJ_RESET   0x01
+#define OUTPAY_RESET 0x3C
+#define INPAY_RESET  0x1D
+#define GCTL_RESET   0x00
 
-typedef struct HdaStreamRegs
-{
-    volatile u8 Ctl[3];
-    volatile u8 Sts;
-    volatile u32 Lpib;
-    volatile u16 Cvi;
-    volatile u16 Reserved;
-    volatile u16 Lvi;
-    volatile u16 Reserved2;
-    volatile u16 Fmt;
-    volatile u16 Reserved3;
-    volatile u32 Bdlp;
-    volatile u32 Bdlp_hi;
-} __attribute__((packed)) HdaStreamRegs;
+typedef enum {
+    CORB_2Entry=0b00,
+    CORB_16Entry=0b01,
+    CORB_256Entry=0b10,
+    CORB_NoWayBro_Its_RESERVED_And_ERROR=0b11
+} __attribute__((packed)) CORB_SIZE_TYPE;
 
-typedef struct HdaBdlEntry
-{
-    u64 Address;
-    u32 Length;
-    u32 Reserved;
-} __attribute__((packed)) HdaBdlEntry;
+typedef enum {
+    RATE_48hz=0b0,
+    RATE_44Point1hz=0b1,
+} __attribute__((packed)) FMT_BASE_RATE;
 
-typedef struct HdaController
-{
-    u64 MmioBase;
-    HdaRegs *Regs;
-    HdaStreamRegs *Streams;
-    u8 HaveCodec;
-    u8 OutputStream;
-    u64 BdlPhys;
-    HdaBdlEntry *Bdl;
-    u8 *AudioBuffer;
-    u32 OutputNid;
-    u8 CodecAddr;
-} HdaController;
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 roOSSCount     : 4;
+            u16 roISSCount     : 4;
+            u16 roBSSCount     : 5;
+            u16 roSDOLineCount : 2;
+            u16 roHave64bit    : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegGCAP;
 
-HdaController *HdaInit(u64 MmioBase);
-void HdaPlay(HdaController *hda, u16 *samples, u32 count);
-void HdaSetVolume(HdaController *hda, u8 volume);
-u64 GetHdaMMIO();
-u8 HdaIsPlaying(HdaController *hda);
-void HdaWait(HdaController *hda);
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 roSubVersion : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegVMIN;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 roMainVersion : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegVMAJ;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 roOutPayLoadCount : 16;
+        };
+    };
+} __attribute__((packed)) HDAudioRegOUTPAY;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 roInPayLoadCount : 16;
+        };
+    };
+} __attribute__((packed)) HDAudioRegINPAY;
+
+typedef struct {
+    union {
+        u32 U;
+        struct {
+            u32 rsvdpRsvd1               : 24;
+            u32 rwUnsolicitedResponse : 1;
+            u32 rsvdpRsvd2               : 6;
+            u32 rwFlushControl        : 1;
+            u32 rwsControllerReset    : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegGCTL;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rsvdpRsvd1         : 1;
+            u16 rwsSerialDataIn : 15;
+        };
+    };
+} __attribute__((packed)) HDAudioRegWAKEEN;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rsvdzRsvd1           : 1;
+            u16 rw1csSerialDataIn : 15;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSTATESTS;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rsvdzRsvd1    : 14;
+            u16 rw1cFSTS : 1;
+            u16 rsvdzRsvd2    : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegGSTS;
+
+typedef struct {
+    u16 roOutStreamPayLoadCapacity;
+} __attribute__((packed)) HDAudioRegOUTSTRMPAY;
+
+typedef struct {
+    u16 roInStreamPayLoadCapacity;
+} __attribute__((packed)) HDAudioRegINSTRMPAY;
+
+typedef struct {
+    union {
+        u32 U;
+        struct {
+            u32 rwGlobalInterruptEnable     : 1;
+            u32 rwControllerInterruptEnable : 1;
+            union {
+                u32 rwStreamInterruptEnable : 32;
+                struct {
+                    u32 rsvdzRsvd1                   : 24;
+                    u32 rwBidirectionalStreaming11 : 1;
+                    u32 rwInputStream31            : 1;
+                    u32 rwInputStream21            : 1;
+                    u32 rwInputStream11            : 1;
+                    u32 rwInputStream22            : 1;
+                    u32 rwInputStream12            : 1;
+                };
+            };
+        };
+    };
+} __attribute__((packed)) HDAudioRegINTCTL;
+
+typedef struct {
+    union {
+        u32 U;
+        struct {
+            u32 roGlobalInterruptStatus     : 1;
+            u32 roControllerInterruptStatus : 1;
+            u32 roStreamInterruptionStatus  : 30;
+        };
+    };
+} __attribute__((packed)) HDAudioRegINTSTS;
+
+typedef struct {
+    u32 Counter;
+} __attribute__((packed)) HDAudioRegWALCLK;
+
+typedef struct {
+    union {
+        u32 U;
+        struct {
+            u32 rsvdpRsvd1              : 2;
+            u32 rwStreamSynchronization : 30;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSSYNC;
+
+typedef struct {
+    union {
+        u64 U;
+        struct {
+            union{
+                u64 Low : 32;
+                struct {
+                    u64 rwLowBase                       : 25;
+                    u64 roLowerBaseAddressUnimplemented : 7;
+                };
+            };
+            union {
+                u64 High : 32;
+                struct {
+                    u64 rwHighBase : 32;
+                };
+            };
+        };
+    };
+} __attribute__((packed)) HDAudioRegCORBBase;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rsvdpRsvd1 : 8;
+            u16 rwWritePtr : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegCORBWritePtr;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rwReset    : 1;
+            u16 rsvdpRsvd1 : 7;
+            u16 roReadPtr  : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegCORBReadPtr;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 rsvdpRsvd1                   : 6;
+            u8 rwEnableDMAEngine            : 1;
+            u8 rwMemoryErrorInterruptEnable : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegCORBCTL;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 rsvdzRsvd1                     : 7;
+            u8 rw1cMemoryErrorInterruptStatus : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegCORBSTS;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 roSizeCapability : 4;
+            u8 rsvdpRsvd1 : 2;
+            union {
+                u8 roSizeU : 2;
+                CORB_SIZE_TYPE roSize : 2;
+            };
+        };
+    };
+} __attribute__((packed)) HDAudioRegCORBSize;
+
+typedef struct {
+    union {
+        u64 U;
+        struct {
+            union{
+                u64 Low : 32;
+                struct {
+                    u64 rwLowBase                       : 25;
+                    u64 roLowerBaseAddressUnimplemented : 7;
+                };
+            };
+            union {
+                u64 High : 32;
+                struct {
+                    u64 rwHighBase : 32;
+                };
+            };
+        };
+    };
+} __attribute__((packed)) HDAudioRegRIRBBase;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 wWritePtrReSet : 1;
+            u16 rsvdpRsvd1     : 7;
+            u16 roWritePtr     : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegRIRBWritePtr;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rsvdpRsvd1               : 8;
+            u16 rwResponseInterruptCount : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegRINTCNT;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 rsvdpRsvd1                        : 5;
+            u8 rwResponseOverrunInterruptControl : 1;
+            u8 rwDMAEnable                       : 1;
+            u8 rwResponseInterruptControl        : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegRIRBCTL;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 rsvdzRsvd1                         : 5;
+            u8 rw1cResponseOverrunInterruptStatus : 1;
+            u8 rsvdzRsvd2                         : 1;
+            u8 rw1cResponseInterruptStatus        : 1;
+        };
+    };
+} __attribute__((packed)) HDAudioRegRIRBSTS;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 roSizeCapability : 4;
+            u8 rsvdpRsvd1       : 2;
+            u8 roSize           : 2;
+        };
+    };
+} __attribute__((packed)) HDAudioRegRIRBSize;
+
+typedef struct {
+    union {
+        u64 U;
+        struct {
+            u64 rwLowBase              : 25;
+            u64 rsvdzRsvd1             : 6;
+            u64 rwPositionBufferEnable : 1;
+            u64 rwHighBase             : 32;
+        };
+    };
+} __attribute__((packed)) HDAudioRegDPBase;
+
+
+typedef struct{
+    union {
+        u8 U[3];
+        struct {
+            u8 rwStreamReset              : 1;
+            u8 rwStreamRun                : 1;
+            u8 rwInterruptOnComplete      : 1;
+            u8 rwFIFOErrorIntEnable       : 1;
+            u8 rwDescriptorErrorIntEnable : 1;
+            u8 rsvdpRsvd1                 : 3;
+            
+            u8 rsvdpRsvd2                 : 4;
+            u8 rwStreamNumber             : 4;
+            u8 rwTrafficPriority          : 1;
+            u8 rwBidirectionalDir         : 1;
+            u8 rsvdpRsvd3                 : 6;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSDOCTL;
+
+typedef struct {
+    union {
+        u8 U;
+        struct {
+            u8 rsvdzRsvd1          : 2;
+            u8 roFIFOReady         : 1;
+            u8 rw1cDescriptorError : 1;
+            u8 rw1cFIFOError       : 4;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSDOSTS;
+
+typedef struct {
+    u32 roLinkPositionInBuffer : 32;
+} __attribute__((packed)) HDAudioRegSDOLPIB;
+
+typedef struct {
+    u32 rwCyclicBufferLength : 32;
+} __attribute__((packed)) HDAudioRegSDOCBL;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 rsvdpRsvd1       : 8;
+            u16 rwLastValidIndex : 8;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSDOLVI;
+
+typedef struct {
+    u16 FIFOSize;
+} __attribute__((packed)) HDAudioRegSDOFIFOS;
+
+typedef struct {
+    union {
+        u16 U;
+        struct {
+            u16 roRsvd1          : 1;
+            union {
+                u16 BaseRateU            : 1;
+                FMT_BASE_RATE rwBaseRate : 1;
+            };
+            u16 rwRateMultiplier : 3;
+            u16 rwRateDivisor    : 3;
+            u16 rsvdpRsvd2       : 1;
+            u16 rwBitDepth       : 3;
+            u16 rwChannelCount   : 4;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSDOFMT;
+
+typedef struct {
+    union {
+        u64 U;
+        struct {
+            u64 rwLowBase              : 24;
+            u64 rsvdzRsvd1             : 7;
+            u64 rwPositionBufferEnable : 1;
+            u64 rwHighBase             : 32;
+        };
+    };
+} __attribute__((packed)) HDAudioRegSDODPBase;
+
+typedef struct {
+    HDAudioRegSDOCTL CTL;
+    HDAudioRegSDOSTS STS;
+    HDAudioRegSDOLPIB LPIB;
+    HDAudioRegSDOCBL CBL;
+    HDAudioRegSDOLVI LVI;
+    HDAudioRegSDOFIFOS FIFOS;
+    HDAudioRegSDODPBase DPBase;
+    u8 Pad[8];
+} __attribute__((packed)) HDAudioRegsStreamChannel;
+
+typedef struct {
+    u32 roCounter;
+} __attribute__((packed)) HDAudioRegWALCLKA;
+
+typedef struct {
+    u32 roLinkPositioninBufferAlias;
+} __attribute__((packed)) HDAudioRegSDOLICBA;
+
+typedef struct {
+    HDAudioRegGCAP GCAP;
+    HDAudioRegVMIN VMIN;
+    HDAudioRegVMAJ VMAJ;
+    HDAudioRegOUTPAY OUTPAY;
+    HDAudioRegINPAY INPAY;
+    HDAudioRegGCTL GCTL;
+    HDAudioRegWAKEEN WAKEEN;
+    HDAudioRegSTATESTS STATESTS;
+    HDAudioRegGSTS GSTS;
+    u8 Rsvd1[6];
+    HDAudioRegOUTSTRMPAY OUTSTRMPAY;
+    HDAudioRegINSTRMPAY INSTRMPAY;
+    u8 Rsvd2[4];
+    HDAudioRegINTCTL INTCTL;
+    HDAudioRegINTSTS INTSTS;
+    u8 Rsvd3[8];
+    HDAudioRegWALCLK WALCLK;
+    u8 Rsvd4[4];
+    HDAudioRegSSYNC SSYNC;
+    u8 Rsvd5[4];
+    HDAudioRegCORBBase CORBBase;
+    HDAudioRegCORBWritePtr CORBWritePtr;
+    HDAudioRegCORBReadPtr CORBReadPtr;
+    HDAudioRegCORBCTL CORBCTL;
+    HDAudioRegCORBSTS CORBSTS;
+    HDAudioRegCORBSize CORBSize;
+    u8 Rsvd6[1];
+    HDAudioRegRIRBBase RIRBBase;
+    HDAudioRegRIRBWritePtr RIRBWritePtr;
+    HDAudioRegRINTCNT RINTCount;
+    HDAudioRegRIRBCTL RIRBCTL;
+    HDAudioRegRIRBSTS RIRBSTS;
+    HDAudioRegRIRBSize RIRBSize;
+    u8 Rsvd7[17];
+    HDAudioRegDPBase DPBase;
+    u8 Rsvd8[8];
+    HDAudioRegsStreamChannel Channels[30];
+    u8 Rsvd9[7636];
+    HDAudioRegWALCLKA WALCLKA;
+    HDAudioRegSDOLICBA LPIBA[30];
+} __attribute__((packed)) HDAudioRegs;
+
+typedef struct {
+    u8 StreamIndex;
+    u8 Direction;
+    u8 IsActive;
+    
+    u8* RingBuffer;
+    u32 BufferSize;
+    u32 ChunkSize;
+    
+    u16 NextToFeed; 
+    void* Bdl;               
+} HDAudioStreamContext;
+
+typedef struct {
+    u32 Response;
+    u32 ResponseEX;
+} __attribute__((packed)) HDARirbEntry;
+
+typedef struct {
+    volatile HDAudioRegs* Regs; 
+    u64 Bar0;
+    u8  NumStreams;
+    HDAudioStreamContext Streams[30];
+    
+    struct {
+        u32* Corb;
+        u16  CorbWritePtr;
+        HDARirbEntry* Rirb;
+        u16  RirbReadPtr;
+        volatile u32* Lpib; 
+    } DmaAlloc;
+
+    enum {
+        HDA_STATE_UNINITIALIZED = 0,
+        HDA_STATE_RESETTING,
+        HDA_STATE_CODEC_DISCOVERY,
+        HDA_STATE_READY,
+        HDA_STATE_ERROR
+    } State;
+
+} HDAudio;
+
+u64 HDAudioMMIO();
+HDAudio* HDAudioInit();

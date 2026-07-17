@@ -6,9 +6,8 @@ void DebugStr(const char *S){
 }
 
 void DebugU64Bit(u64 LLU){
-    char buf[65] = "0";
-    MemSet((u8*)buf, '0', 64);
-    Bit64Str(LLU, buf, 64);
+    char buf[65] = "0000000000000000000000000000000000000000000000000000000000000000";
+    Bit64Str(LLU, buf);
     buf[64]='\0';
     DebugStr(buf);
 }

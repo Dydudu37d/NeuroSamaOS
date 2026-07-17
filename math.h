@@ -13,6 +13,35 @@
 
 static const f64 DOUBLE_ONE = 1.0;
 static const f32 FLOAT_ONE = 1.0f;
+const f64 inv_2pi = INV_2PI;
+const f64 two_pi = M_2PI;
+const f64 log_2e = LOG2E;
+const f64 inv_pi = INV_PI;
+
+static const f64 CONST_1_OVER_6 = 1.0/6.0;
+static const f64 CONST_1_OVER_120 = 1.0/120.0;
+static const f64 CONST_1_OVER_5040 = 1.0/5040.0;
+static const f64 CONST_1_OVER_362880 = 1.0/362880.0;
+static const f64 CONST_1_OVER_40320 = 1.0/40320.0;
+static const f64 CONST_1_OVER_720 = 1.0/720.0;
+static const f64 CONST_1_OVER_24 = 1.0/24.0;
+static const f64 CONST_1_OVER_3628800 = 1.0/3628800.0;
+static const f64 CONST_1_OVER_39916800 = 1.0/39916800.0;
+static const f64 CONST_1_OVER_479001600 = 1.0/479001600.0;
+static const f64 CONST_1_OVER_87178291200 = 1.0/87178291200.0;
+static const f64 CONST_1_OVER_3 = 1.0/3.0;
+static const f64 CONST_1_OVER_5 = 1.0/5.0;
+static const f64 CONST_1_OVER_7 = 1.0/7.0;
+static const f64 CONST_1_OVER_9 = 1.0/9.0;
+static const f64 CONST_1_OVER_11 = 1.0/11.0;
+static const f64 CONST_1_OVER_13 = 1.0/13.0;
+static const f64 CONST_0_5 = 0.5;
+static const f32 CONST_F32_1_OVER_6 = 1.0f/6.0f;
+static const f32 CONST_F32_1_OVER_120 = 1.0f/120.0f;
+static const f32 CONST_F32_1_OVER_5040 = 1.0f/5040.0f;
+static const f32 CONST_F32_1_OVER_362880 = 1.0f/362880.0f;
+static const f32 CONST_F32_NEG_1 = -1.0f;
+static const f64 CONST_1 = 1.0;
 
 static inline s64 S64Abs(s64 x) {
     s64 result;
@@ -105,8 +134,17 @@ static inline f32 DoubleSin(f64 x) {
     if (x != x) return x;
     if (x > 1e7f || x < -1e7f) return 0.0f;
     
-    f64 sign = 1.0f;
     f64 result;
+    const f64 inv_2pi = INV_2PI;
+    const f64 two_pi = M_2PI;
+    const f32 neg_one = -1.0f;
+    const f32 one = 1.0f;
+    const f32 pi = 3.141592653589793f;
+    const f32 half_pi = 1.570796326794896f;
+    const f32 c1 = 1.0f/362880.0f;
+    const f32 c2 = 1.0f/5040.0f;
+    const f32 c3 = 1.0f/120.0f;
+    const f32 c4 = 1.0f/6.0f;
     
     __asm__ volatile (
         "movss       %1,       %%xmm0\n\t"
@@ -168,16 +206,16 @@ static inline f32 DoubleSin(f64 x) {
         "movss       %%xmm3,   %0"
         : "=m"(result)
         : "m"(x),
-          "m"(0.159154943091895f),
-          "m"(6.283185307179586f),
-          "m"(-1.0f),
-          "m"(1.0f),
-          "m"(3.141592653589793f),
-          "m"(1.570796326794896f),
-          "m"(1.0f/362880.0f),
-          "m"(1.0f/5040.0f),
-          "m"(1.0f/120.0f),
-          "m"(1.0f/6.0f)
+          "m"(inv_2pi),
+          "m"(two_pi),
+          "m"(neg_one),
+          "m"(one),
+          "m"(pi),
+          "m"(half_pi),
+          "m"(c1),
+          "m"(c2),
+          "m"(c3),
+          "m"(c4)
         : "eax", "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "memory"
     );
     
@@ -225,14 +263,14 @@ static inline f64 DoubleCos(f64 x) {
         "movsd %%xmm2, %0"
         : "=m"(result)
         : "m"(x2),
-          "m"(1.0/87178291200.0),
-          "m"(1.0/479001600.0),
-          "m"(1.0/39916800.0),
-          "m"(1.0/3628800.0),
-          "m"(1.0/40320.0),
-          "m"(1.0/720.0),
-          "m"(1.0/24.0),
-          "m"(1.0/2.0),
+          "m"(CONST_1_OVER_87178291200),
+          "m"(CONST_1_OVER_479001600),
+          "m"(CONST_1_OVER_39916800),
+          "m"(CONST_1_OVER_3628800),
+          "m"(CONST_1_OVER_40320),
+          "m"(CONST_1_OVER_720),
+          "m"(CONST_1_OVER_24),
+          "m"(CONST_0_5),
           "m"(DOUBLE_ONE)
         : "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "memory"
     );
@@ -242,6 +280,12 @@ static inline f64 DoubleCos(f64 x) {
 
 static inline f32 FloatSin(f32 x) {
     f32 result;
+    const f32 inv_pi = INV_PI;
+    const f32 one = 1.0f;
+    const f32 c1 = 1.0f/5040.0f;
+    const f32 c2 = 1.0f/120.0f;
+    const f32 c3 = 1.0f/6.0f;
+    
     __asm__ volatile (
         "movss %1, %%xmm0\n\t"
         "movss %2, %%xmm1\n\t"
@@ -266,10 +310,10 @@ static inline f32 FloatSin(f32 x) {
         "mulss %%xmm0, %%xmm3\n\t"
         "movss %%xmm3, %0"
         : "=m"(result)
-        : "m"(x), "m"(INV_PI), "m"(1.0f),
-          "m"(1.0f/5040.0f),
-          "m"(1.0f/120.0f),
-          "m"(1.0f/6.0f),
+        : "m"(x), "m"(inv_pi), "m"(one),
+          "m"(c1),
+          "m"(c2),
+          "m"(c3),
           "m"(FLOAT_ONE)
         : "xmm0", "xmm1", "xmm2", "xmm3", "memory"
     );
@@ -283,6 +327,8 @@ static inline f32 FloatCos(f32 x) {
 static inline f64 DoubleExp(f64 x) {
     f64 result;
     const f64 one = 1.0;
+    const f64 log2e = LOG2E;
+    const f64 ln2 = LN2;
     
     __asm__ volatile (
         "movsd      %1,       %%xmm0\n\t"
@@ -316,14 +362,14 @@ static inline f64 DoubleExp(f64 x) {
         "mulsd      %%xmm3,   %%xmm2\n\t"
         "movsd      %%xmm2,   %0\n\t"
         : "=m"(result)
-        : "m"(x), "m"(LOG2E), "m"(LN2),
-          "m"(1.0/40320.0),
-          "m"(1.0/5040.0),
-          "m"(1.0/720.0),
-          "m"(1.0/120.0),
-          "m"(1.0/24.0),
-          "m"(1.0/6.0),
-          "m"(0.5),
+        : "m"(x), "m"(log2e), "m"(ln2),
+          "m"(CONST_1_OVER_40320),
+          "m"(CONST_1_OVER_5040),
+          "m"(CONST_1_OVER_720),
+          "m"(CONST_1_OVER_120),
+          "m"(CONST_1_OVER_24),
+          "m"(CONST_1_OVER_6),
+          "m"(CONST_0_5),
           "m"(one)
         : "rax", "xmm0", "xmm1", "xmm2", "xmm3", "memory"
     );
@@ -331,6 +377,9 @@ static inline f64 DoubleExp(f64 x) {
 }
 
 static inline void DoubleExp4(const f64* x, f64* result) {
+    const f64 log2e = LOG2E;
+    const f64 ln2 = LN2;
+    
     __asm__ volatile (
         "vmovupd %1, %%ymm0\n\t"
         "vbroadcastsd %2, %%ymm1\n\t"
@@ -366,20 +415,20 @@ static inline void DoubleExp4(const f64* x, f64* result) {
         "vaddpd %%ymm3, %%ymm2, %%ymm2\n\t"
         "vmulpd %%ymm1, %%ymm2, %%ymm2\n\t"
         
-        "vbroadcastsd %12, %%ymm3\n\t"
+        "vbroadcastsd %11, %%ymm3\n\t"
         "vaddpd %%ymm3, %%ymm2, %%ymm2\n\t"
         "vaddpd %%ymm0, %%ymm2, %%ymm0\n\t"
         
         "vmovupd %%ymm0, %0"
         : "=m"(result[0])
-        : "m"(x[0]), "m"(LOG2E), "m"(LN2),
-          "m"(1.0/5040.0),
-          "m"(1.0/720.0),
-          "m"(1.0/120.0),
-          "m"(1.0/24.0),
-          "m"(1.0/6.0),
-          "m"(0.5),
-          "m"(1.0),
+        : "m"(x[0]), "m"(log2e), "m"(ln2),
+          "m"(CONST_1_OVER_5040),
+          "m"(CONST_1_OVER_720),
+          "m"(CONST_1_OVER_120),
+          "m"(CONST_1_OVER_24),
+          "m"(CONST_1_OVER_6),
+          "m"(CONST_0_5),
+          "m"(CONST_1),
           "m"(DOUBLE_ONE)
         : "ymm0", "ymm1", "ymm2", "ymm3", "memory"
     );
@@ -396,8 +445,8 @@ static inline f64 DoubleLog(f64 x) {
     f64 z = (m - 1.0) / (m + 1.0);
     f64 z2 = z * z;
     f64 result;
-    const f64 one = 1.0;
     const f64 two = 2.0;
+    const f64 ln2 = LN2;
     
     __asm__ volatile (
         "movsd      %1,       %%xmm0\n\t"
@@ -414,24 +463,24 @@ static inline f64 DoubleLog(f64 x) {
         "mulsd      %%xmm1,   %%xmm2\n\t"
         "addsd      %8,       %%xmm2\n\t"
         "mulsd      %%xmm1,   %%xmm2\n\t"
-        "addsd      %10,      %%xmm2\n\t"
+        "addsd      %9,       %%xmm2\n\t"
         "mulsd      %%xmm0,   %%xmm2\n\t"
         "addsd      %%xmm2,   %%xmm0\n\t"
-        "mulsd      %11,      %%xmm0\n\t"
-        "movsd      %9,       %%xmm1\n\t"
-        "cvtsi2sd   %12,      %%xmm2\n\t"
+        "mulsd      %9,       %%xmm0\n\t"
+        "movsd      %10,      %%xmm1\n\t"
+        "cvtsi2sd   %11,      %%xmm2\n\t"
         "mulsd      %%xmm2,   %%xmm1\n\t"
         "addsd      %%xmm1,   %%xmm0\n\t"
         "movsd      %%xmm0,   %0\n\t"
         : "=m"(result)
         : "m"(z), "m"(z2),
-          "m"(1.0/3.0),
-          "m"(1.0/5.0),
-          "m"(1.0/7.0),
-          "m"(1.0/9.0),
-          "m"(1.0/11.0),
-          "m"(LN2),
-          "m"(one),
+          "m"(CONST_1_OVER_3),
+          "m"(CONST_1_OVER_5),
+          "m"(CONST_1_OVER_7),
+          "m"(CONST_1_OVER_9),
+          "m"(CONST_1_OVER_11),
+          "m"(CONST_1_OVER_13),
+          "m"(ln2),
           "m"(two),
           "r"(exp)
         : "xmm0", "xmm1", "xmm2", "memory"
@@ -444,6 +493,9 @@ static inline f64 DoubleTanh(f64 x) {
     if (ax > 19.0) return (x > 0) ? 1.0 : -1.0;
     
     f64 result;
+    const f64 half = 0.5;
+    const f64 third = 1.0/3.0;
+    
     __asm__ volatile (
         "movsd %1, %%xmm0\n\t"
         "movsd %2, %%xmm1\n\t"
@@ -462,8 +514,8 @@ static inline f64 DoubleTanh(f64 x) {
         "movsd %%xmm3, %0"
         : "=m"(result)
         : "m"(x), "m"(ax),
-          "m"(0.5),
-          "m"(0.33333333333333333333333333333333333333333333333333L),
+          "m"(half),
+          "m"(third),
           "m"(DOUBLE_ONE)
         : "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "memory"
     );
@@ -508,12 +560,12 @@ static inline f64 DoubleAtan(f64 x) {
         "movsd %%xmm2, %0"
         : "=m"(result)
         : "m"(ax), "m"(ax2),
-          "m"(1.0/13.0),
-          "m"(1.0/11.0),
-          "m"(1.0/9.0),
-          "m"(1.0/7.0),
-          "m"(1.0/5.0),
-          "m"(1.0/3.0),
+          "m"(CONST_1_OVER_13),
+          "m"(CONST_1_OVER_11),
+          "m"(CONST_1_OVER_9),
+          "m"(CONST_1_OVER_7),
+          "m"(CONST_1_OVER_5),
+          "m"(CONST_1_OVER_3),
           "m"(DOUBLE_ONE)
         : "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "memory"
     );
@@ -603,7 +655,7 @@ static inline f64 DoubleSinCos(f64 x, f64* cos_out) {
         "mulsd %%xmm1, %%xmm2\n\t"
         "addsd %8, %%xmm2\n\t"
         "mulsd %%xmm1, %%xmm2\n\t"
-        "movsd %18, %%xmm3\n\t"
+        "movsd %19, %%xmm3\n\t"
         "addsd %%xmm3, %%xmm2\n\t"
         "mulsd %%xmm0, %%xmm2\n\t"
         "movsd %%xmm2, %11\n\t"
@@ -619,26 +671,26 @@ static inline f64 DoubleSinCos(f64 x, f64* cos_out) {
         "mulsd %%xmm1, %%xmm9\n\t"
         "addsd %17, %%xmm9\n\t"
         "mulsd %%xmm1, %%xmm9\n\t"
-        "movsd %18, %%xmm3\n\t"
+        "movsd %19, %%xmm3\n\t"
         "addsd %%xmm3, %%xmm9\n\t"
         "movsd %%xmm9, %12"
         : "=m"(sin_res), "=m"(cos_res)
         : "m"(x), "m"(x2),
-          "m"(1.0/479001600.0),
-          "m"(1.0/39916800.0),
-          "m"(1.0/3628800.0),
-          "m"(1.0/362880.0),
-          "m"(1.0/5040.0),
-          "m"(1.0/120.0),
-          "m"(1.0/6.0),
-          "m"(1.0/87178291200.0),
-          "m"(1.0/479001600.0),
-          "m"(1.0/39916800.0),
-          "m"(1.0/3628800.0),
-          "m"(1.0/40320.0),
-          "m"(1.0/720.0),
-          "m"(1.0/24.0),
-          "m"(1.0/2.0),
+          "m"(CONST_1_OVER_479001600),
+          "m"(CONST_1_OVER_39916800),
+          "m"(CONST_1_OVER_3628800),
+          "m"(CONST_1_OVER_362880),
+          "m"(CONST_1_OVER_5040),
+          "m"(CONST_1_OVER_120),
+          "m"(CONST_1_OVER_6),
+          "m"(CONST_1_OVER_87178291200),
+          "m"(CONST_1_OVER_479001600),
+          "m"(CONST_1_OVER_39916800),
+          "m"(CONST_1_OVER_3628800),
+          "m"(CONST_1_OVER_40320),
+          "m"(CONST_1_OVER_720),
+          "m"(CONST_1_OVER_24),
+          "m"(CONST_0_5),
           "m"(DOUBLE_ONE)
         : "xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7", "xmm8", "xmm9", "xmm10", "xmm11", "memory"
     );
@@ -648,6 +700,15 @@ static inline f64 DoubleSinCos(f64 x, f64* cos_out) {
 }
 
 static inline void DoubleSin4(const f64* x, f64* result) {
+    const f64 inv_2pi = INV_2PI;
+    const f64 two_pi = M_2PI;
+    const f64 c1 = 0.16666666666666666666666666666666666666666666666667;
+    const f64 c2 = 0.0083333333333333333333333333333333333333333333333333;
+    const f64 c3 = 0.0001984126984126984126984126984126984126984126984127;
+    const f64 c4 = 0.0000027557319223985890652557319223985890652557319223986;
+    const f64 c5 = 0.000000025052108385441718775086526454433405762264671030183;
+    const f64 c6 = 0.00000000016059043836821614599367051893912127525694291685921;
+    
     __asm__ volatile (
         "vmovupd %1, %%ymm0\n\t"
         "vbroadcastsd %2, %%ymm1\n\t"
@@ -691,18 +752,21 @@ static inline void DoubleSin4(const f64* x, f64* result) {
         
         "vmovupd %%ymm0, %0"
         : "=m"(result[0])
-        : "m"(x[0]), "m"(INV_2PI), "m"(M_2PI),
-          "m"(0.16666666666666666666666666666666666666666666666667),
-          "m"(0.0083333333333333333333333333333333333333333333333333),
-          "m"(0.0001984126984126984126984126984126984126984126984127),
-          "m"(0.0000027557319223985890652557319223985890652557319223986),
-          "m"(0.000000025052108385441718775086526454433405762264671030183),
-          "m"(0.00000000016059043836821614599367051893912127525694291685921)
+        : "m"(x[0]), "m"(inv_2pi), "m"(two_pi),
+          "m"(c1),
+          "m"(c2),
+          "m"(c3),
+          "m"(c4),
+          "m"(c5),
+          "m"(c6)
         : "ymm0", "ymm1", "ymm2", "ymm3", "ymm4", "memory"
     );
 }
 
 static inline void DoubleCos4(const f64* x, f64* result) {
+    const f64 inv_2pi = INV_2PI;
+    const f64 two_pi = M_2PI;
+    
     __asm__ volatile (
         "vmovupd %1, %%ymm0\n\t"
         "vbroadcastsd %2, %%ymm1\n\t"
@@ -744,16 +808,62 @@ static inline void DoubleCos4(const f64* x, f64* result) {
         
         "vmovupd %%ymm0, %0"
         : "=m"(result[0])
-        : "m"(x[0]), "m"(INV_2PI), "m"(M_2PI),
-          "m"(1.0/87178291200.0),
-          "m"(1.0/479001600.0),
-          "m"(1.0/39916800.0),
-          "m"(1.0/3628800.0),
-          "m"(1.0/40320.0),
-          "m"(1.0/720.0),
-          "m"(1.0/24.0),
-          "m"(1.0/2.0),
+        : "m"(x[0]), "m"(inv_2pi), "m"(two_pi),
+          "m"(CONST_1_OVER_87178291200),
+          "m"(CONST_1_OVER_479001600),
+          "m"(CONST_1_OVER_39916800),
+          "m"(CONST_1_OVER_3628800),
+          "m"(CONST_1_OVER_40320),
+          "m"(CONST_1_OVER_720),
+          "m"(CONST_1_OVER_24),
+          "m"(CONST_0_5),
           "m"(DOUBLE_ONE)
         : "ymm0", "ymm1", "ymm2", "ymm3", "memory"
     );
+}
+
+f64 DoubleRound(f64 val, int round_to) {
+    f64 factor = 1.0;
+    for (int i = 0; i < round_to; i++) {
+        factor *= 10.0;
+    }
+
+    val *= factor;
+    f64 result;
+
+    __asm__ volatile (
+        "vroundsd $0x04, %1, %1, %0\n\t"
+        : "=x" (result)
+        : "x" (val)
+    );
+
+    return result / factor;
+}
+
+f32 FloatRound(f32 val, int round_to) {
+    static const f32 pow10[] = {
+        1.0f, 10.0f, 100.0f, 1000.0f, 10000.0f, 100000.0f, 1000000.0f
+    };
+    
+    if (round_to < 0 || round_to > 6) return val;
+    
+    f32 factor = pow10[round_to];
+    
+    f32 sign = (val < 0.0f) ? -1.0f : 1.0f;
+    if (val < 0.0f) val = -val;
+
+    val *= factor;
+
+    val += 1e-6f; 
+
+    f32 result;
+
+    __asm__ volatile (
+        "vroundss $0x04, %1, %1, %0\n\t"
+        : "=x" (result)
+        : "x" (val)
+    );
+
+
+    return (result / factor) * sign;
 }

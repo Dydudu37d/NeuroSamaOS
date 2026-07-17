@@ -95,9 +95,9 @@ run-kvm: boot.efi
 		-accel kvm \
 		-cpu host \
 		-boot order=d \
+		-audiodev pa,id=Sound \
 		-device intel-hda \
-		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+		-device hda-duplex,audiodev=Sound \
 		-device qemu-xhci,id=xhci0 \
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \
@@ -121,9 +121,9 @@ debug-kvm: boot.efi
 		-device usb-kbd,bus=xhci1.0,port=1 \
 		-device usb-mouse,bus=xhci1.0,port=2 \
 		-s -S -no-reboot -no-shutdown \
+		-audiodev pa,id=Sound \
 		-device intel-hda \
-		-device hda-duplex,audiodev=my-audio \
-		-audiodev pa,id=my-audio,server=/run/user/1000/pulse/native \
+		-device hda-duplex,audiodev=Sound \
 		-device qemu-xhci,id=xhci0 \
 		-device usb-kbd,bus=xhci0.0 \
 		-device usb-mouse,bus=xhci0.0 \

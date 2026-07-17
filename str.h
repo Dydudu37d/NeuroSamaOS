@@ -11,7 +11,7 @@ void MemSet32(void* D,const u32 S,size_t size);
 void MemSet64(void* D,const u64 S,size_t size);
 _Bool StrIs(const char* D,const char* S);
 u64 StrLen(const char* S);
-void Bit64Str(u64 N,char* Buf,size_t size);
+void Bit64Str(u64 N,char* Buf);
 int StrSplit(char* Str, char Split, char** left, char** right);
 _Bool StrIsNoCase(const char* D, const char* S);
 

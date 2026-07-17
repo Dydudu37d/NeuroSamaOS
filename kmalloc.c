@@ -165,7 +165,7 @@ void* MaxAlignedAlloc(AllocPool* Pool, size_t size, size_t align, u64 MaxPos) {
 }
 
 void Free(AllocPool* Pool, void* ptr) {
-    if (!ptr || !Pool || ptr < 4 << 10) return;
+    if (!ptr || !Pool || ptr < (4 << 10)) return;
     DebugStr("AllocPool at 0x");
     DebugU64((u64)Pool);
     DebugChar('\n');

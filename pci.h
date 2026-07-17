@@ -162,7 +162,7 @@ static inline void PCIFindDeviceByClass(u8 TargetClass, u8 TargetSubClass, u8 Ta
                 u8 ProgIF = (ClassRev >> 8) & 0xFF;
 
                 if (ClassCode == TargetClass && SubClass == TargetSubClass) {
-                    DebugStr("Found USB controller: Bus=");
+                    DebugStr("Found controller: Bus=");
                     DebugU8(Bus);
                     DebugStr(" Dev=");
                     DebugU8(Dev);

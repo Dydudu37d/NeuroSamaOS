@@ -196,12 +196,11 @@ void MemSet64(void* D, const u64 S, size_t size) {
     }
 }
 
-void Bit64Str(u64 N,char* Buf,size_t size){
-    if (size==0) return;
-    for (u64 idx=0;idx<size&&idx<65;idx++){
-        Buf[idx]=(N&1ULL<<idx)?49:48;
+void Bit64Str(u64 N,char* Buf){
+    for (s64 idx=63;idx>=0;idx--){
+        Buf[idx]=((N>>idx)&1)+48;
     }
-    Buf[size]='\0';
+    Buf[64]='\0';
 }
 
 _Bool StrIs(const char* D, const char* S) {
