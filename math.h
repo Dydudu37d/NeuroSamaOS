@@ -130,7 +130,7 @@ static inline f64 DoubleMod2PI(f64 x) {
     return result;
 }
 
-static inline f32 DoubleSin(f64 x) {
+static inline f64 DoubleSin(f64 x) {
     if (x != x) return x;
     if (x > 1e7f || x < -1e7f) return 0.0f;
     

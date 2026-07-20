@@ -63,6 +63,10 @@ static inline void PCIEnableDevice(u8 Bus, u8 Slot, u8 Func)
     u16 Command = PCIReadWORD(Bus, Slot, Func, 0x04);
     Command |= (1 << 0) | (1 << 1) | (1 << 2);
     PCIWriteWORD(Bus, Slot, Func, 0x04, Command);
+    u16 CommandAfter = PCIReadWORD(Bus, Slot, Func, 0x04);
+    DebugStr("Command register after enable: 0x");
+    DebugU16(CommandAfter);
+    DebugChar('\n');
 }
 
 static inline u64 PCIGetBARAddress(u8 Bus, u8 Slot, u8 Func, u8 BarIndex) {

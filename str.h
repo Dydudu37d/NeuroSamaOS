@@ -14,6 +14,7 @@ u64 StrLen(const char* S);
 void Bit64Str(u64 N,char* Buf);
 int StrSplit(char* Str, char Split, char** left, char** right);
 _Bool StrIsNoCase(const char* D, const char* S);
+u64 HowManyCharInString(char* String,char Char);
 
 static void __attribute__((used)) memset(void* D,const u8 S,size_t size){MemSet(D,S,size);}
 static void __attribute__((used)) memcpy(void* D,const void* S,size_t size){MemCopy(D,S,size);}

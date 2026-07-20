@@ -13,7 +13,7 @@ Erm......
 - HolyFish-JIT
 - La57
 - VA=PA
-- XHCIz
+- XHCI
 - No EHCI OHCI UHCI (I rm -rf ohci.* uhci.*)
 - GM206
 - ATA & FAT32 & GPT
@@ -28,7 +28,7 @@ Thanks to the Linux kernel open-source community and NVIDIA's official documenta
 *(I used a translation tool and DeepSeek for this acknowledgment, as English is not my native language and I want to ensure accuracy.)*
 
 ## Info
-NeuroSamaOS, Polling,No int,irq only 0~31,gdt ring0,no ring3,VA=PA
+NeuroSamaOS, Polling,No int,irq only 0~31,gdt ring0,no ring3,VA=PA, talkative debug
 
 ## DSLMaker
 Right,Everyone can Make DSL/General Lang like Scratch3.x
@@ -39,7 +39,9 @@ make
 ```
 ## Run
 ```bash
-make run
+make run-kvm
+make run-whpx
+make run-tcg
 ```
 
 ## Debug

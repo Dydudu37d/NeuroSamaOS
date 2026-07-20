@@ -53,12 +53,14 @@ static inline u64 CalibrateTscUsingStall(void) {
 void InitClock(void);
 
 u64 SystemGetTime(void);
+u64 SystemGetTimeS(void);
 u64 SystemGetTimeNano(void);
 u64 SystemGetTimeMillis(void);
 u64 GetTscFrequency(void);
 void SetTscFrequency(u64 f);
 
 void SystemBusySleepS(u64 Time);
+void SystemBusySleepUs(u64 Time);
 void SystemBusySleepNano(u64 Time);
 void SystemBusySleepMs(u64 Time);
 

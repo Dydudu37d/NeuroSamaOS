@@ -1,12 +1,24 @@
 #include "efi.h"
+#include "int.h"
+#include "kmalloc.h"
+
+#define UHCI_LOW_MEMORY_BASE 0x10000
+#define UHCI_LOW_MEMORY_SIZE (32 * 1024 * 1024)
+
+const size_t KERNEL_POOL_SIZE = (1<<30);
+const size_t KERNEL_POOL_PAGES = EFI_SIZE_TO_PAGES(KERNEL_POOL_SIZE);
+
+u8* KernelStack = NULL;
+#pragma section(".KernelPool", read, write, bss)
+
+__attribute__((aligned(64))) u8 KernelPoolHeadList[KERNEL_POOL_SIZE + sizeof(AllocBlock)];
+
 #include "flash.h"
 #include "gop.h"
-#include "int.h"
 #include "str.h"
 #include "debug.h"
 #include "pci.h"
 #include "xhci.h"
-#include "kmalloc.h"
 #include "gdt.h"
 #include "idt.h"
 #include "Context.h"
@@ -21,9 +33,6 @@
 #include "clock.h"
 #include "xhci.h"
 #include "math.h"
-
-#define UHCI_LOW_MEMORY_BASE 0x10000
-#define UHCI_LOW_MEMORY_SIZE (32 * 1024 * 1024)
 
 #define PAGE_PRESENT  (1ULL << 0)
 #define PAGE_WRITABLE (1ULL << 1)
@@ -42,12 +51,6 @@ EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop=NULL;
 
 EFI_GUID GopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 RegContext MainGlobalContext={0};
-
-const size_t KERNEL_POOL_SIZE = (1<<30);
-const size_t KERNEL_POOL_PAGES = EFI_SIZE_TO_PAGES(KERNEL_POOL_SIZE);
-
-u8* KernelStack = NULL;
-u8 KernelPoolHeadList[KERNEL_POOL_SIZE*sizeof(AllocBlock)];
 
 #define PAGE_SIZE_4KB  0x1000ULL
 #define PAGE_SIZE_2MB  0x200000ULL
@@ -455,7 +458,7 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
     DebugStr("KERNEL_POOL_PAGES = ");
     DebugU64(KERNEL_POOL_PAGES);
     DebugChar('\n');
-    InitPool(&KernelPool, KERNEL_POOL_SIZE, KernelPoolHeadList);
+    InitPool(&KernelPool, KERNEL_POOL_SIZE+sizeof(AllocBlock), KernelPoolHeadList);
     DebugStr("KernelPool initialized at 0x");
     DebugU64((u64)KernelPool.Head);
     DebugStr("\n");

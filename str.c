@@ -203,6 +203,12 @@ void Bit64Str(u64 N,char* Buf){
     Buf[64]='\0';
 }
 
+u64 HowManyCharInString(char* String,char Char){
+    u64 Many=0;
+    while (String++) if(*String==Char) Many++;
+    return Many;
+}
+
 _Bool StrIs(const char* D, const char* S) {
     if (!D || !S) return D == S;
     while (*D && *S) {

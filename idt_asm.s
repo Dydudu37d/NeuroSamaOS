@@ -19,7 +19,7 @@ machine_check_handler:
 1:
     leaq mc_emergency_stack(%rip), %rbp
     movq %rbp, %rsp
-    addq 4096, %rsp
+    addq 1048576, %rsp
 2:
     pushq %rax
     pushq %rcx
@@ -168,6 +168,10 @@ machine_check_handler:
 10:
     leaq msg_halt(%rip), %rsi
     call print_string_asm
+    jmp 11f
+11:
+    hlt
+    jmp 11b
     ret
     print_string_asm:
     pushq %rax

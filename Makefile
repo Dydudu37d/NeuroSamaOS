@@ -16,7 +16,8 @@ CCArg = --target=x86_64-unknown-windows-gnu \
         -fno-stack-protector \
         -mno-stack-arg-probe -g -fno-builtin -ffreestanding \
 		-fno-builtin-all -mllvm --max-store-memcpy=999999 -fno-builtin \
-		-fno-builtin-memcpy -fno-builtin-memset -ffreestanding -nostdinc -nostdlib -mstack-alignment=16
+		-fno-builtin-memcpy -fno-builtin-memset -ffreestanding -nostdinc -nostdlib \
+		-mstack-alignment=16 -fno-strict-aliasing -fno-tree-vectorize -std=gnu99 -Wl,--no-dynamicbase
 
 LD := ld.lld
 LDArg = -m i386pep \
@@ -173,6 +174,67 @@ debug-tcg: boot.efi
 		-device usb-kbd,bus=xhci-bus.0 \
 		-device usb-tablet,bus=xhci-bus.0 \
 		-trace events=./tmp/xhci.trace
+
+run-speed-kvm: boot.efi
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel kvm \
+		-cpu host \
+		-boot order=d \
+		-audiodev pa,id=Sound \
+		-device intel-hda \
+		-device hda-duplex,audiodev=Sound \
+		-device qemu-xhci,id=xhci0 \
+		-device usb-kbd,bus=xhci0.0 \
+		-device usb-mouse,bus=xhci0.0 \
+		-d guest_errors,unimp -D qemu.log \
+		-no-reboot -no-shutdown -trace events=./tmp/xhci.trace \
+		-display sdl,gl=on
+
+run-speed-whpx: boot.efi
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel whpx \
+		-cpu Broadwell,hle=off,rtm=off \
+		-boot order=d \
+	    -d int,cpu_reset -D qemu.log -no-reboot -no-shutdown \
+		-device qemu-xhci,id=xhci0 \
+		-device usb-kbd,bus=xhci0.0 \
+		-device usb-mouse,bus=xhci0.0 \
+		-trace events=./tmp/xhci.trace \
+		-display sdl,gl=on
+
+run-speed-tcg: boot.efi
+	mkdir -p $(EFI_BOOT_DIR)
+	cp boot.efi $(EFI_BOOT_DIR)/BOOTX64.EFI
+	qemu-system-x86_64 \
+		-drive if=pflash,format=raw,unit=0,file=./OVMF.fd,readonly=on \
+		-drive format=raw,file=fat:rw:disk \
+		-m 4G \
+		-smp 2 \
+		-serial stdio \
+		-accel tcg \
+		-cpu Broadwell \
+		-boot order=d \
+		-device piix3-usb-xhci,id=xhci-bus \
+		-device usb-mouse,bus=xhci-bus.0 \
+		-device usb-kbd,bus=xhci-bus.0 \
+		-device usb-tablet,bus=xhci-bus.0 \
+		-d guest_errors,unimp -D qemu.log \
+		-no-reboot -no-shutdown -trace events=./tmp/xhci.trace \
+		-display sdl,gl=on
 
 iso: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)

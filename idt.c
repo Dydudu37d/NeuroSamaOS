@@ -15,7 +15,7 @@ volatile _Bool InExceptionHandler = 0;
 volatile static u64 Cr2;
 volatile static u64 Cr3;
 
-__attribute__((aligned(16))) u8 mc_emergency_stack[4096];
+__attribute__((aligned(4096))) u8 mc_emergency_stack[1<<20];
 volatile u64 mc_saved_old_rsp = 0;
 
 struct InterruptFrame {
@@ -110,7 +110,7 @@ u8 get_instruction_length(u64 rip) {
         }
     } else {
         if ((op & 0xC0) == 0x00) { if ((op & 0x07) <= 0x05) has_modrm = 1; }
-        else if ((op & 0xF8) == 0.50) { has_modrm = 0; }
+        else if ((op & 0xF8) == 0x50) { has_modrm = 0; }
         else if ((op & 0xF8) == 0x68) { 
             if (op == 0x68) imm_size = 4;
             else if (op == 0x6A) imm_size = 1;
