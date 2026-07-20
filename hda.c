@@ -220,15 +220,16 @@ HDAudio* HDAudioInit(){
 
     SystemBusySleepUs(100);
 
-    NewHDAudio->DmaAlloc.Corb[1].U = 0;
+    u16 OldRirb = NewHDAudio->DmaAlloc.RirbWritePtr->roWritePtr;
+
     NewHDAudio->DmaAlloc.Corb[1].rwCodecAddr = ValidCodecAddr;
-    NewHDAudio->DmaAlloc.Corb[1].rwNodeId = 0;
+    NewHDAudio->DmaAlloc.Corb[1].rwNodeId = 0x00;
     NewHDAudio->DmaAlloc.Corb[1].rwVerbId = 0xF00;
     NewHDAudio->DmaAlloc.Corb[1].rwParameter = 0x00;
 
     asm volatile("sfence" ::: "memory");
 
-    NewHDAudio->Regs->CORBWritePtr.rwWritePtr = 1;
+    NewHDAudio->DmaAlloc.CorbWritePtr->rwWritePtr = 1;
 
     DebugStr("Send Corb\n");
     DebugStr("CORBWP before wait: "); DebugU16(NewHDAudio->Regs->CORBWritePtr.rwWritePtr); DebugChar('\n');
@@ -245,7 +246,6 @@ HDAudio* HDAudioInit(){
     DebugU16(*(volatile u16*)((u64)NewHDAudio->Bar0 + 0x4A));
     DebugChar('\n');
 
-    u16 OldRirb = NewHDAudio->Regs->RIRBWritePtr.roWritePtr;
     u32 Timeout = 1000000;
     while (OldRirb == NewHDAudio->Regs->RIRBWritePtr.roWritePtr){
         asm volatile("pause\n\t");
@@ -260,9 +260,15 @@ HDAudio* HDAudioInit(){
 
     if (Timeout > 0) {
         u16 RirbWp = NewHDAudio->Regs->RIRBWritePtr.roWritePtr;
-        u16 idx = (RirbWp == 0) ? (NewHDAudio->NumRIRB - 1) : (RirbWp - 1);
+        DebugStr("RirbWp: ");DebugU16(RirbWp);DebugChar('\n');
+        u16 idx = RirbWp;
         DebugStr("Get RIRB\n");
         DebugStr("RIRB Get:");DebugU64(NewHDAudio->DmaAlloc.Rirb[idx].U);DebugChar('\n');
+        DebugStr("RIRB:\n\t.roCodecAddr:");DebugU32(NewHDAudio->DmaAlloc.Rirb[idx].roCodecAddr);
+        DebugStr("\n\t.roRsvdEX:");DebugU32(NewHDAudio->DmaAlloc.Rirb[idx].roRsvdEX);
+        DebugStr("\n\t.roUnsolicited:");DebugU32(NewHDAudio->DmaAlloc.Rirb[idx].roUnsolicited);
+        DebugStr("\n\t.roResponse:");DebugU32(NewHDAudio->DmaAlloc.Rirb[idx].roResponse);
+        DebugStr("\n\t.roResponseEx:");DebugU32(NewHDAudio->DmaAlloc.Rirb[idx].roResponseEx);DebugChar('\n');
     } else {
         DebugStr("Failed to receive RIRB response.\n");
     }

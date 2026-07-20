@@ -17,3 +17,4 @@ disk/
 *.log
 tmp/*
 tmp/
+*.elf

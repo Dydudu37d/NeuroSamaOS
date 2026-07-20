@@ -6,7 +6,7 @@ EFI_BOOT_DIR := $(DISK_DIR)/EFI/BOOT
 
 all: boot.efi
 
-CCArg = --target=x86_64-unknown-windows-gnu \
+CCArg = --target=x86_64-elf \
         -ffreestanding \
         -nostdlib \
         -mno-red-zone \
@@ -17,13 +17,13 @@ CCArg = --target=x86_64-unknown-windows-gnu \
         -mno-stack-arg-probe -g -fno-builtin -ffreestanding \
 		-fno-builtin-all -mllvm --max-store-memcpy=999999 -fno-builtin \
 		-fno-builtin-memcpy -fno-builtin-memset -ffreestanding -nostdinc -nostdlib \
-		-mstack-alignment=16 -fno-strict-aliasing -fno-tree-vectorize -std=gnu99 -Wl,--no-dynamicbase
+		-mstack-alignment=16 -fno-strict-aliasing -std=gnu99 -Wl,--no-dynamicbase
 
 LD := ld.lld
-LDArg = -m i386pep \
+LDArg = -m elf_x86_64 \
 	--entry=efi_main \
 	--no-undefined \
-	--gc-sections 
+	--gc-sections -T linker.ld
 
 S_OBJS = $(wildcard *.s)
 C_OBJS = $(wildcard *.c)
@@ -43,8 +43,9 @@ O_OBJS = $(patsubst %.c,%.o,$(C_OBJS)) \
 	$(CC) $(CCArg) -c $< -o $@
 
 boot.efi: $(O_OBJS)
-	$(LD) $(LDArg) $^ -o boot.exe
-	llvm-objcopy --subsystem=efi-app boot.exe $@
+	$(LD) $(LDArg) $^ -o boot.elf
+	objcopy -O pei-x86-64 boot.elf boot.exe
+	objcopy --subsystem=efi-app boot.exe $@
 
 run-whpx: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)

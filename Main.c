@@ -52,6 +52,17 @@ EFI_GRAPHICS_OUTPUT_PROTOCOL *Gop=NULL;
 EFI_GUID GopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 RegContext MainGlobalContext={0};
 
+extern u8 __text_start[];
+extern u8 __text_end[];
+extern u8 __rodata_start[];
+extern u8 __rodata_end[];
+extern u8 __data_start[];
+extern u8 __data_end[];
+extern u8 __bss_start[];
+extern u8 __bss_end[];
+extern u8 __image_end[];
+extern u64 __image_size;
+
 #define PAGE_SIZE_4KB  0x1000ULL
 #define PAGE_SIZE_2MB  0x200000ULL
 #define PAGE_SIZE_1GB  0x40000000ULL
@@ -356,6 +367,26 @@ EFI_STATUS EFIAPI Cefi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *sys) {
         DebugStr("\r\n[ERROR] HandleProtocol failed to fetch ImageBase! Code: ");
         DebugU64(status);
     }
+
+    DebugStr("=== NeuroSamaOS Memory Layout ===\n");
+    DebugStr(".text  : 0x"); DebugU64((u64)__text_start);
+    DebugStr(" - 0x"); DebugU64((u64)__text_end);
+    DebugStr(" (size: "); DebugU64((u64)__text_end - (u64)__text_start); DebugStr(" bytes)\n");
+
+    DebugStr(".rodata: 0x"); DebugU64((u64)__rodata_start);
+    DebugStr(" - 0x"); DebugU64((u64)__rodata_end);
+    DebugStr(" (size: "); DebugU64((u64)__rodata_end - (u64)__rodata_start); DebugStr(" bytes)\n");
+
+    DebugStr(".data  : 0x"); DebugU64((u64)__data_start);
+    DebugStr(" - 0x"); DebugU64((u64)__data_end);
+    DebugStr(" (size: "); DebugU64((u64)__data_end - (u64)__data_start); DebugStr(" bytes)\n");
+
+    DebugStr(".bss   : 0x"); DebugU64((u64)__bss_start);
+    DebugStr(" - 0x"); DebugU64((u64)__bss_end);
+    DebugStr(" (size: "); DebugU64((u64)__bss_end - (u64)__bss_start); DebugStr(" bytes)\n");
+
+    DebugStr("Total image size: "); DebugU64((u64)__image_size); DebugStr(" bytes\n");
+    DebugStr("Image ends at: 0x"); DebugU64((u64)__image_end); DebugChar('\n');
 
     bs->LocateProtocol(&GopGuid, NULL, (void **)&Gop);
 

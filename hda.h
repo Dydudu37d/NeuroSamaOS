@@ -153,11 +153,11 @@ typedef struct {
 
 typedef struct {
     union {
-        u64 U;
+        volatile u64 U;
         struct {
-            u64 roLowerBaseAddressUnimplemented : 7;
-            u64 rwLowBase                       : 25;
-            u64 rwHighBase                      : 32;
+            volatile u64 roLowerBaseAddressUnimplemented : 7;
+            volatile u64 rwLowBase                       : 25;
+            volatile u64 rwHighBase                      : 32;
         };
     };
 } __attribute__((packed)) HDAudioRegCORBBase;
@@ -210,18 +210,18 @@ typedef struct {
         struct {
             volatile u8 roSizeCapability : 4;
             volatile u8 rsvdpRsvd1       : 2;
-            CORB_SIZE_TYPE roSize : 2;
+            volatile CORB_SIZE_TYPE roSize : 2;
         };
     };
 } __attribute__((packed)) HDAudioRegCORBSize;
 
 typedef struct {
     union {
-        u64 U;
+        volatile u64 U;
         struct {
-            u64 roLowerBaseAddressUnimplemented : 7;
-            u64 rwLowBase                       : 25;
-            u64 rwHighBase                      : 32;
+            volatile u64 roLowerBaseAddressUnimplemented : 7;
+            volatile u64 rwLowBase                       : 25;
+            volatile u64 rwHighBase                      : 32;
         };
     };
 } __attribute__((packed)) HDAudioRegRIRBBase;
@@ -277,19 +277,19 @@ typedef struct {
         struct {
             volatile u8 roSizeCapability   : 4;
             volatile u8 rsvdpRsvd1         : 2;
-            CORB_SIZE_TYPE roSize : 2;
+            volatile CORB_SIZE_TYPE roSize : 2;
         };
     };
 } __attribute__((packed)) HDAudioRegRIRBSize;
 
 typedef struct {
     union {
-        u64 U;
+        volatile u64 U;
         struct {
-            u64 rsvdzRsvd1             : 7;
-            u64 rwLowBase              : 24;
-            u64 rwPositionBufferEnable : 1;
-            u64 rwHighBase             : 32;
+            volatile u64 rsvdzRsvd1             : 7;
+            volatile u64 rwLowBase              : 24;
+            volatile u64 rwPositionBufferEnable : 1;
+            volatile u64 rwHighBase             : 32;
         };
     };
 } __attribute__((packed)) HDAudioRegDPBase;
@@ -369,24 +369,24 @@ typedef struct {
 
 typedef struct {
     union {
-        u64 U;
+        volatile u64 U;
         struct {
-            u64 rsvdzRsvd1 : 7;
-            u64 rwLowBase : 25;
-            u64 rwHighBase : 32;
+            volatile u64 rsvdzRsvd1 : 7;
+            volatile u64 rwLowBase : 25;
+            volatile u64 rwHighBase : 32;
         };
     };
 } __attribute__((packed)) HDAudioRegSDODPBase;
 
 typedef struct {
-    HDAudioRegSDOCTL CTL;
-    HDAudioRegSDOSTS STS;
-    HDAudioRegSDOLPIB LPIB;
-    HDAudioRegSDOCBL CBL;
-    HDAudioRegSDOLVI LVI;
-    HDAudioRegSDOFIFOS FIFOS;
-    HDAudioRegSDOFMT FMT;
-    HDAudioRegSDODPBase DPBase;
+    volatile HDAudioRegSDOCTL CTL;
+    volatile HDAudioRegSDOSTS STS;
+    volatile HDAudioRegSDOLPIB LPIB;
+    volatile HDAudioRegSDOCBL CBL;
+    volatile HDAudioRegSDOLVI LVI;
+    volatile HDAudioRegSDOFIFOS FIFOS;
+    volatile HDAudioRegSDOFMT FMT;
+    volatile HDAudioRegSDODPBase DPBase;
     volatile u8 Pad[4];
 } __attribute__((packed)) HDAudioRegsStreamChannel;
 
@@ -430,41 +430,41 @@ typedef struct {
     volatile HDAudioRegWAKEEN WAKEEN;
     volatile HDAudioRegSTATESTS STATESTS;
     volatile HDAudioRegGSTS GSTS;
-    volatile volatile u8 Rsvd0[6];
+    volatile u8 Rsvd0[6];
     volatile HDAudioRegOUTSTRMPAY OUTSTRMPAY;
     volatile HDAudioRegINSTRMPAY INSTRMPAY;
-    volatile volatile u8 Rsvd1[4];
+    volatile u8 Rsvd1[4];
     volatile HDAudioRegINTCTL INTCTL;
     volatile HDAudioRegINTSTS INTSTS;
-    volatile volatile u8 Rsvd2[8];
+    volatile u8 Rsvd2[8];
     volatile HDAudioRegWALCLK WALCLK;
-    volatile volatile u8 Rsvd3[4];
+    volatile u8 Rsvd3[4];
     volatile HDAudioRegSSYNC SSYNC;
-    volatile volatile u8 Rsvd4[4];
+    volatile u8 Rsvd4[4];
     volatile HDAudioRegCORBBase CORBBase;
     volatile HDAudioRegCORBWritePtr CORBWritePtr;
     volatile HDAudioRegCORBReadPtr CORBReadPtr;
     volatile HDAudioRegCORBCTL CORBCTL;
     volatile HDAudioRegCORBSTS CORBSTS;
     volatile HDAudioRegCORBSize CORBSize;
-    volatile volatile u8 Rsvd5;
+    volatile u8 Rsvd5;
     volatile HDAudioRegRIRBBase RIRBBase;
     volatile HDAudioRegRIRBWritePtr RIRBWritePtr;
     volatile HDAudioRegRINTCNT RINTCNT;
     volatile HDAudioRegRIRBCTL RIRBCTL;
     volatile HDAudioRegRIRBSTS RIRBSTS;
     volatile HDAudioRegRIRBSize RIRBSize;
-    volatile volatile u8 Rsvd6;
+    volatile u8 Rsvd6;
     volatile HDAudioRegICOI ICOI;
     volatile HDAudioRegICII ICII;
     volatile HDAudioRegICIS ICIS;
-    volatile volatile u8 Rsvd7[6];
+    volatile u8 Rsvd7[6];
     volatile HDAudioRegDPBase DPBase;
-    volatile volatile u8 Rsvd8[8];
+    volatile u8 Rsvd8[8];
     volatile HDAudioRegsStreamChannel Channels[30];
-    volatile volatile u8 Rsvd9[7092];
+    volatile u8 Rsvd9[7092];
     volatile HDAudioRegWALCLKA WALCLKA;
-    volatile volatile u8 RsvdA[80];
+    volatile u8 RsvdA[80];
     volatile HDAudioRegSDOLICBA LPIBA[30];
 } __attribute__((packed)) HDAudioRegs;
 
@@ -472,15 +472,15 @@ typedef struct {
     union {
         u64 U;
         struct {
-            volatile u32 Response;
-            volatile u32 roResponseEx;
-        };
-        struct {
             volatile u32 roResponse;
-            volatile u32 roResponseIndex : 4;
-            volatile u32 roUnsolicited   : 1;
-            volatile u32 roRsvdEX        : 23;
-            volatile u32 roCodecAddr     : 4;
+            union {
+                volatile u32 roResponseEx;
+                struct {
+                    volatile u32 roCodecAddr : 4;
+                    volatile u32 roUnsolicited : 1;
+                    volatile u32 roRsvdEX : 27;
+                };
+            };
         };
     };
 } __attribute__((packed)) HDAudioRirbEntry;
@@ -500,16 +500,16 @@ typedef struct {
 typedef struct {
     volatile HDAudioRegs* Regs;
     u64 Bar0;
-    volatile u8 NumStreams;
+    u8 NumStreams;
     u16 NumCORB;
     u16 NumRIRB;
     u16 CodecVendorId;
     u16 CodecDeviceId;
     struct {
-        HDAudioCorbEntry* Corb;
-        HDAudioRegCORBWritePtr* CorbWritePtr;
-        HDAudioRirbEntry* Rirb;
-        HDAudioRegRIRBWritePtr* RirbWritePtr;
+        volatile HDAudioCorbEntry* Corb;
+        volatile HDAudioRegCORBWritePtr* CorbWritePtr;
+        volatile HDAudioRirbEntry* Rirb;
+        volatile HDAudioRegRIRBWritePtr* RirbWritePtr;
         volatile u32* Lpib;
     } DmaAlloc;
     enum {
