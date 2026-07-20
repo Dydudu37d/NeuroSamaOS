@@ -20,7 +20,7 @@ CCArg = --target=x86_64-elf \
 		-mstack-alignment=16 -fno-strict-aliasing -std=gnu99 -Wl,--no-dynamicbase
 
 LD := ld.lld
-LDArg = -m elf_x86_64 \
+LDArg = -m i386pep \
 	--entry=efi_main \
 	--no-undefined \
 	--gc-sections -T linker.ld
@@ -42,10 +42,17 @@ O_OBJS = $(patsubst %.c,%.o,$(C_OBJS)) \
 %.o: %.S
 	$(CC) $(CCArg) -c $< -o $@
 
-boot.efi: $(O_OBJS)
-	$(LD) $(LDArg) $^ -o boot.elf
-	objcopy -O pei-x86-64 boot.elf boot.exe
-	objcopy --subsystem=efi-app boot.exe $@
+boot.elf: $(O_OBJS)
+	ld.lld -m elf_x86_64 \
+           --entry=efi_main \
+           --no-undefined \
+           --gc-sections \
+           -T linker.ld \
+           $^ -o $@
+
+boot.efi: boot.elf
+	objcopy -O pei-x86-64 --subsystem=efi-app boot.elf boot.exe
+	objcopy --change-addresses=0x10000 boot.exe $@
 
 run-whpx: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
