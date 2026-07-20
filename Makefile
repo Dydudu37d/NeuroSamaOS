@@ -6,7 +6,7 @@ EFI_BOOT_DIR := $(DISK_DIR)/EFI/BOOT
 
 all: boot.efi
 
-CCArg = --target=x86_64-elf \
+CCArg = --target=x86_64-unknown-windows-gnu \
         -ffreestanding \
         -nostdlib \
         -mno-red-zone \
@@ -23,7 +23,7 @@ LD := ld.lld
 LDArg = -m i386pep \
 	--entry=efi_main \
 	--no-undefined \
-	--gc-sections -T linker.ld
+	--gc-sections 
 
 S_OBJS = $(wildcard *.s)
 C_OBJS = $(wildcard *.c)
@@ -42,17 +42,9 @@ O_OBJS = $(patsubst %.c,%.o,$(C_OBJS)) \
 %.o: %.S
 	$(CC) $(CCArg) -c $< -o $@
 
-boot.elf: $(O_OBJS)
-	ld.lld -m elf_x86_64 \
-           --entry=efi_main \
-           --no-undefined \
-           --gc-sections \
-           -T linker.ld \
-           $^ -o $@
-
-boot.efi: boot.elf
-	objcopy -O pei-x86-64 --subsystem=efi-app boot.elf boot.exe
-	objcopy --change-addresses=0x10000 boot.exe $@
+boot.efi: $(O_OBJS)
+	$(LD) $(LDArg) $^ -o boot.exe
+	llvm-objcopy --subsystem=efi-app boot.exe $@
 
 run-whpx: boot.efi
 	mkdir -p $(EFI_BOOT_DIR)
